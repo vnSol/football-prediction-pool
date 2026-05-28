@@ -73,8 +73,8 @@ Example `Matches` row:
 
 ```text
 matchId: M001
-homeTeam: Argentina
-awayTeam: Germany
+homeTeam: Andoria
+awayTeam: New Avalon
 kickoffUtc: 2026-06-12T19:00:00.000Z
 stage: GROUP
 status: SCHEDULED
@@ -83,7 +83,7 @@ handicapSide: HOME
 handicapGoals: -0.5
 ```
 
-`/set_odds M001 HOME -0.5` stores the raw odds for settlement, but Telegram displays the odds as a positive line: `Kèo: Germany chấp Argentina 0.5 Trái`. If the raw odds is positive, the named side is displayed as the team giving the handicap.
+`/set_odds M001 HOME -0.5` stores the raw odds for settlement, but Telegram displays the odds as a positive line: `Kèo: New Avalon chấp Andoria 0.5 Trái`. If the raw odds is positive, the named side is displayed as the team giving the handicap.
 
 Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-MM-DD HH:mm GMT+7`. The draw button appears only when the handicap is a whole number such as `0`, `1`, or `2`; half/quarter lines hide the draw button.
 
@@ -118,7 +118,7 @@ Manual commands are fallback controls. Normal flow is handled by `runScheduler()
 The bot uses OpenAI for two automated messages:
 
 - After lock: a suspenseful betting summary based only on Sheet facts.
-- After settle: a Vietnamese match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.
+- After settle: a localized match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.
 
 If OpenAI is not configured or the API call fails, the bot falls back to deterministic template messages so operations continue.
 
@@ -127,10 +127,10 @@ Use `gpt-5-mini` for the default MVP. It is cost-effective for this well-defined
 Examples:
 
 ```text
-/add_player 123456789 Viet Mai Hoang
+/add_player 123456789 Player One
 /set_player_active 123456789 true
-/add_match T001 2026-06-12T19:00:00.000Z GROUP Argentina vs Germany
-/add_match T002 2026-06-13T02:00:00.000Z KNOCKOUT United_States vs South_Korea
+/add_match T001 2026-06-12T19:00:00.000Z GROUP Andoria vs New_Avalon
+/add_match T002 2026-06-13T02:00:00.000Z KNOCKOUT Eastland vs Southmont
 /set_match_time T001 2026-06-12T20:00:00.000Z
 /dryrun
 /dryrun 2026-06-12T00:00:00.000Z
