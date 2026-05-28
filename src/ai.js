@@ -68,3 +68,41 @@ function generateAiMatchRecap(match, score, scoreChanges, leaderboard) {
     { webSearch: true }
   );
 }
+
+function generateAiDryRunMatches(baseTimeUtc) {
+  var text = generateAiText(buildDryRunPrompt(baseTimeUtc), { webSearch: false });
+  var parsed = JSON.parse(text);
+  var matches = Array.isArray(parsed) ? parsed : parsed.matches;
+  if (!Array.isArray(matches) || matches.length < 3 || matches.length > 5) {
+    throw new Error("AI dry-run response must contain 3-5 matches");
+  }
+  return normalizeDryRunMatchesForOrchestration(matches.map(normalizeDryRunMatch), baseTimeUtc);
+}
+
+function normalizeDryRunMatch(match) {
+  var stage = String(match.stage || "").toUpperCase();
+  var status = String(match.status || STATUSES.SCHEDULED).toUpperCase();
+  var favoriteSide = String(match.favoriteSide || "").toUpperCase();
+  var handicapSide = String(match.handicapSide || favoriteSide || "").toUpperCase();
+  var handicapGoals = match.handicapGoals === "" || match.handicapGoals == null ? "" : Number(match.handicapGoals);
+
+  if (!match.matchId || !match.homeTeam || !match.awayTeam) throw new Error("AI dry-run match missing team fields");
+  if (Number.isNaN(toDate(match.kickoffUtc).getTime())) throw new Error("AI dry-run match invalid kickoffUtc");
+  if (stage !== "GROUP" && stage !== "KNOCKOUT") throw new Error("AI dry-run match invalid stage");
+  if (status !== STATUSES.SCHEDULED) throw new Error("AI dry-run match invalid status");
+  if (favoriteSide && !isValidSelection(favoriteSide)) throw new Error("AI dry-run match invalid favoriteSide");
+  if (handicapSide && !isValidSelection(handicapSide)) throw new Error("AI dry-run match invalid handicapSide");
+  if (handicapGoals !== "" && !isFinite(handicapGoals)) throw new Error("AI dry-run match invalid handicapGoals");
+
+  return {
+    matchId: String(match.matchId),
+    homeTeam: String(match.homeTeam),
+    awayTeam: String(match.awayTeam),
+    kickoffUtc: toDate(match.kickoffUtc).toISOString(),
+    stage: stage,
+    status: status,
+    favoriteSide: favoriteSide,
+    handicapSide: handicapSide,
+    handicapGoals: handicapGoals,
+  };
+}

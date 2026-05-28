@@ -69,6 +69,10 @@ function setupWorkbook() {
   });
 }
 
+function getSheetNames() {
+  return Object.keys(SHEET_HEADERS);
+}
+
 function ensureSheet(sheetName) {
   var spreadsheet = getSpreadsheet();
   return spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
@@ -136,6 +140,30 @@ function appendObject(sheetName, object) {
 function appendAuditedObject(sheetName, object, actor, action, entityType, entityId) {
   appendObject(sheetName, object);
   audit(action, entityType, entityId, actor, null, object);
+}
+
+function resetSheetData(sheetName, actor) {
+  if (!SHEET_HEADERS[sheetName]) return { ok: false, reason: "unknown_sheet" };
+  var sheet = ensureSheet(sheetName);
+  ensureHeaders(sheet, SHEET_HEADERS[sheetName]);
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getMaxColumns()).clearContent();
+  }
+  protectSheet(sheet);
+  audit("RESET_SHEET", "Sheet", sheetName, actor, null, { sheetName: sheetName, clearedRows: Math.max(0, lastRow - 1) });
+  return { ok: true, clearedRows: Math.max(0, lastRow - 1) };
+}
+
+function appendMatches(matches, actor) {
+  var created = [];
+  var skipped = [];
+  matches.forEach(function (match) {
+    var result = addMatch(match, actor);
+    if (result.ok) created.push(match.matchId);
+    else skipped.push(match.matchId);
+  });
+  return { created: created, skipped: skipped };
 }
 
 function updateObject(sheetName, matcher, patch) {

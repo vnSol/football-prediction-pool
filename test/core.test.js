@@ -12,6 +12,7 @@ const {
   formatLeaderboard,
   formatHandicap,
   formatRecap,
+  formatMyUpcomingPicks,
   getSchedulerActions,
   getTelegramUpdateDedupeKey,
   parseAddMatchArgs,
@@ -19,6 +20,10 @@ const {
   buildAiRecapPrompt,
   buildLockDramaPrompt,
   buildLockedBettingFacts,
+  buildResetSheetKeyboard,
+  buildResetSheetConfirmKeyboard,
+  buildDryRunMatches,
+  normalizeDryRunMatchesForOrchestration,
   parseCallbackData,
   parseTelegramCommand,
   scorePick,
@@ -209,6 +214,51 @@ test("formats leaderboard in rank order", () => {
   );
 });
 
+test("formats all picks in the next six hours for a player", () => {
+  assert.equal(
+    formatMyUpcomingPicks({
+      now: date("2026-06-12T00:00:00.000Z"),
+      matches: [
+        {
+          matchId: "M1",
+          homeTeam: "Argentina",
+          awayTeam: "Germany",
+          kickoffUtc: "2026-06-12T05:30:00.000Z",
+          favoriteSide: SELECTIONS.HOME,
+          handicapGoals: 0.5,
+        },
+        {
+          matchId: "M2",
+          homeTeam: "Brazil",
+          awayTeam: "Japan",
+          kickoffUtc: "2026-06-12T07:00:00.000Z",
+          favoriteSide: SELECTIONS.AWAY,
+          handicapGoals: 1,
+        },
+        {
+          matchId: "OLD",
+          homeTeam: "France",
+          awayTeam: "Spain",
+          kickoffUtc: "2026-06-11T20:00:00.000Z",
+          favoriteSide: SELECTIONS.HOME,
+          handicapGoals: 0.5,
+        },
+      ],
+      picks: [
+        { matchId: "M1", selection: SELECTIONS.HOME, star: true },
+        { matchId: "OLD", selection: SELECTIONS.AWAY, star: false },
+      ],
+    }),
+    [
+      "📌 Pick các trận trong 6 giờ tới",
+      "M1: Argentina vs Germany",
+      "Giờ đá: 2026-06-12 12:30 GMT+7",
+      "Kèo: Argentina chấp Germany 0.5 Trái",
+      "Pick: Argentina ⭐",
+    ].join("\n")
+  );
+});
+
 test("formats handicap as positive odds with favorite first", () => {
   assert.equal(
     formatHandicap({
@@ -267,6 +317,65 @@ test("parses callback data and builds pick keyboard", () => {
   assert.deepEqual(keyboard.inline_keyboard[1], [
     { text: "⭐ Ngôi sao hi vọng", callback_data: "star|M001|toggle" },
   ]);
+});
+
+test("builds reset sheet selection and confirmation keyboards", () => {
+  assert.deepEqual(buildResetSheetKeyboard(["Players", "Matches"]), {
+    inline_keyboard: [
+      [{ text: "Players", callback_data: "reset_select|Players|" }],
+      [{ text: "Matches", callback_data: "reset_select|Matches|" }],
+    ],
+  });
+
+  assert.deepEqual(buildResetSheetConfirmKeyboard("Matches"), {
+    inline_keyboard: [
+      [
+        { text: "Confirm reset Matches", callback_data: "reset_confirm|Matches|" },
+        { text: "Cancel", callback_data: "reset_cancel|Matches|" },
+      ],
+    ],
+  });
+});
+
+test("builds dry-run matches covering orchestration cases", () => {
+  const matches = buildDryRunMatches("2026-06-12T00:00:00.000Z");
+
+  assert.equal(matches.length, 5);
+  assert.deepEqual(
+    matches.map((match) => [match.matchId, match.stage, match.status, match.favoriteSide, match.handicapGoals]),
+    [
+      ["DRY-GROUP-HALF", "GROUP", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5],
+      ["DRY-GROUP-INTEGER", "GROUP", STATUSES.SCHEDULED, SELECTIONS.AWAY, 1],
+      ["DRY-KO-HALF", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5],
+      ["DRY-KO-INTEGER", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.AWAY, 0],
+      ["DRY-MISSING-ODDS", "GROUP", STATUSES.SCHEDULED, "", ""],
+    ]
+  );
+  assert.equal(matches[0].kickoffUtc, "2026-06-12T05:30:00.000Z");
+});
+
+test("normalizes AI dry-run matches into orchestration-ready cases", () => {
+  const normalized = normalizeDryRunMatchesForOrchestration(
+    [
+      { matchId: "AI1", homeTeam: "Team A", awayTeam: "Team B" },
+      { matchId: "AI2", homeTeam: "Team C", awayTeam: "Team D" },
+      { matchId: "AI3", homeTeam: "Team E", awayTeam: "Team F" },
+      { matchId: "AI4", homeTeam: "Team G", awayTeam: "Team H" },
+      { matchId: "AI5", homeTeam: "Team I", awayTeam: "Team J" },
+    ],
+    "2026-06-12T00:00:00.000Z"
+  );
+
+  assert.deepEqual(
+    normalized.map((match) => [match.matchId, match.stage, match.status, match.favoriteSide, match.handicapGoals, match.kickoffUtc]),
+    [
+      ["AI1", "GROUP", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5, "2026-06-12T05:30:00.000Z"],
+      ["AI2", "GROUP", STATUSES.SCHEDULED, SELECTIONS.AWAY, 1, "2026-06-12T05:45:00.000Z"],
+      ["AI3", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5, "2026-06-12T05:50:00.000Z"],
+      ["AI4", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.AWAY, 0, "2026-06-12T05:55:00.000Z"],
+      ["AI5", "GROUP", STATUSES.SCHEDULED, "", "", "2026-06-12T05:40:00.000Z"],
+    ]
+  );
 });
 
 test("omits draw button when handicap is not a whole number", () => {

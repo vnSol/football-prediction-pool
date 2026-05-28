@@ -90,7 +90,8 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 ## Player Commands
 
 - `/matches`: show open matches.
-- `/mypick <matchId>`: show current pick.
+- `/mypick`: show all picks, including missing picks, for matches that have not started.
+- `/mypick <matchId>`: show current pick for one match.
 - `/leaderboard`: show leaderboard.
 - Inline buttons: choose home/draw/away and toggle star for knockout matches.
 
@@ -100,6 +101,8 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 - `/set_player_active <telegramUserId> <true|false>`
 - `/add_match <matchId> <kickoffUtc> <GROUP|KNOCKOUT> <home team> vs <away team>`
 - `/set_match_time <matchId> <kickoffUtc>`
+- `/reset_sheet`
+- `/dryrun [baseTimeUtc]`
 - `/set_odds <matchId> <HOME|AWAY> <-0.5>`
 - `/open <matchId>`
 - `/lock <matchId>`
@@ -128,9 +131,13 @@ Examples:
 /add_match T001 2026-06-12T19:00:00.000Z GROUP Argentina vs Germany
 /add_match T002 2026-06-13T02:00:00.000Z KNOCKOUT United_States vs South_Korea
 /set_match_time T001 2026-06-12T20:00:00.000Z
+/dryrun
+/dryrun 2026-06-12T00:00:00.000Z
 ```
 
 Use `_` for spaces in team names when needed; the bot stores `_` as spaces.
+
+`/reset_sheet` shows sheet-name buttons and asks for confirmation before clearing data rows. It keeps headers and protection in place. `/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases, inserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. If the AI call fails, the bot uses a deterministic fallback set.
 
 ## Telegram Spam / Retry Recovery
 

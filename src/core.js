@@ -187,6 +187,40 @@ function formatLeaderboard(rows, limit) {
   );
 }
 
+function formatMyUpcomingPicks(input) {
+  var now = toDate(input.now || new Date());
+  var picksByMatchId = {};
+  (input.picks || []).forEach(function (pick) {
+    picksByMatchId[String(pick.matchId)] = pick;
+  });
+
+  var upcoming = (input.matches || [])
+    .filter(function (match) {
+      var minutes = minutesUntil(match, now);
+      return minutes > 0 && minutes <= 360;
+    })
+    .sort(function (a, b) {
+      return toDate(a.kickoffUtc).getTime() - toDate(b.kickoffUtc).getTime();
+    });
+
+  if (upcoming.length === 0) return "Không có trận nào trong 6 giờ tới.";
+
+  return (
+    "📌 Pick các trận trong 6 giờ tới\n" +
+    upcoming
+      .map(function (match) {
+        var pick = picksByMatchId[String(match.matchId)];
+        return [
+          match.matchId + ": " + sideName(match, SELECTIONS.HOME) + " vs " + sideName(match, SELECTIONS.AWAY),
+          "Giờ đá: " + formatKickoffTime(match.kickoffUtc),
+          "Kèo: " + formatHandicap(match),
+          "Pick: " + (pick ? sideName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : "") : "Chưa pick"),
+        ].join("\n");
+      })
+      .join("\n\n")
+  );
+}
+
 function formatPoints(points) {
   return Number(points) > 0 ? "+" + Number(points) : String(Number(points));
 }
@@ -367,6 +401,76 @@ function buildPickKeyboard(match) {
   return { inline_keyboard: keyboard };
 }
 
+function buildResetSheetKeyboard(sheetNames) {
+  return {
+    inline_keyboard: sheetNames.map(function (sheetName) {
+      return [{ text: sheetName, callback_data: "reset_select|" + sheetName + "|" }];
+    }),
+  };
+}
+
+function buildResetSheetConfirmKeyboard(sheetName) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Confirm reset " + sheetName, callback_data: "reset_confirm|" + sheetName + "|" },
+        { text: "Cancel", callback_data: "reset_cancel|" + sheetName + "|" },
+      ],
+    ],
+  };
+}
+
+function buildDryRunMatches(baseTimeUtc) {
+  return normalizeDryRunMatchesForOrchestration(
+    [
+      { matchId: "DRY-GROUP-HALF", homeTeam: "Argentina", awayTeam: "Germany" },
+      { matchId: "DRY-GROUP-INTEGER", homeTeam: "Brazil", awayTeam: "Japan" },
+      { matchId: "DRY-KO-HALF", homeTeam: "France", awayTeam: "Spain" },
+      { matchId: "DRY-KO-INTEGER", homeTeam: "Netherlands", awayTeam: "Portugal" },
+      { matchId: "DRY-MISSING-ODDS", homeTeam: "England", awayTeam: "USA" },
+    ],
+    baseTimeUtc
+  );
+}
+
+function normalizeDryRunMatchesForOrchestration(matches, baseTimeUtc) {
+  var base = toDate(baseTimeUtc);
+  var cases = [
+    ["GROUP", SELECTIONS.HOME, 0.5, 330],
+    ["GROUP", SELECTIONS.AWAY, 1, 345],
+    ["KNOCKOUT", SELECTIONS.HOME, 0.5, 350],
+    ["KNOCKOUT", SELECTIONS.AWAY, 0, 355],
+    ["GROUP", "", "", 340],
+  ];
+
+  return matches.slice(0, 5).map(function (match, index) {
+    var scenario = cases[index] || cases[cases.length - 1];
+    var favoriteSide = scenario[1];
+    return {
+      matchId: String(match.matchId || "DRY-" + (index + 1)),
+      homeTeam: String(match.homeTeam || "Home " + (index + 1)),
+      awayTeam: String(match.awayTeam || "Away " + (index + 1)),
+      kickoffUtc: new Date(base.getTime() + scenario[3] * 60000).toISOString(),
+      stage: scenario[0],
+      status: STATUSES.SCHEDULED,
+      favoriteSide: favoriteSide,
+      handicapSide: favoriteSide,
+      handicapGoals: scenario[2],
+    };
+  });
+}
+
+function buildDryRunPrompt(baseTimeUtc) {
+  return [
+    "Create synthetic World Cup prediction-pool test data as JSON only.",
+    "Return exactly 5 matches covering: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one missing-odds scheduled match.",
+    "Use kickoffUtc values after this UTC base time: " + toDate(baseTimeUtc).toISOString(),
+    "Fields per item: matchId, homeTeam, awayTeam, kickoffUtc, stage, status, favoriteSide, handicapSide, handicapGoals.",
+    "stage must be GROUP or KNOCKOUT. status must be SCHEDULED. favoriteSide/handicapSide must be HOME or AWAY, except missing-odds match uses empty strings and empty handicapGoals.",
+    "Use realistic but clearly synthetic teams. Do not include Markdown.",
+  ].join("\n");
+}
+
 function shouldShowDrawOption(match) {
   return Number.isInteger(Math.abs(Number(match.handicapGoals || 0)));
 }
@@ -460,13 +564,19 @@ if (typeof module !== "undefined") {
     buildLockDramaPrompt: buildLockDramaPrompt,
     buildLockedBettingFacts: buildLockedBettingFacts,
     createDefaultPicks: createDefaultPicks,
+    buildDryRunMatches: buildDryRunMatches,
+    buildDryRunPrompt: buildDryRunPrompt,
+    normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
     formatHandicap: formatHandicap,
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,
+    formatMyUpcomingPicks: formatMyUpcomingPicks,
     formatRecap: formatRecap,
     getHandicapOutcome: getHandicapOutcome,
     getSchedulerActions: getSchedulerActions,
     getTelegramUpdateDedupeKey: getTelegramUpdateDedupeKey,
+    buildResetSheetConfirmKeyboard: buildResetSheetConfirmKeyboard,
+    buildResetSheetKeyboard: buildResetSheetKeyboard,
     hasLockedOdds: hasLockedOdds,
     isKnockout: isKnockout,
     isValidSelection: isValidSelection,

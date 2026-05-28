@@ -62,18 +62,21 @@ function dailySync() {
 
 function runScheduler() {
   withScriptLock(function () {
-    var now = new Date();
-    var matches = getMatches();
-    var picks = getPicks();
-    getSchedulerActions(matches, picks, now).forEach(function (action) {
-      var match = getMatchById(action.matchId);
-      if (!match) return;
-      if (action.type === ACTIONS.OPEN_PICK) openMatch(match.matchId, "scheduler");
-      if (action.type === ACTIONS.ODDS_ALERT) alertMissingOdds(match);
-      if (action.type === ACTIONS.REMIND_MISSING) remindMissing(match);
-      if (action.type === ACTIONS.LOCK_MATCH) lockMatch(match.matchId, "scheduler");
-      if (action.type === ACTIONS.PROMPT_RESULT) promptResult(match);
-    });
+    processSchedulerActions(new Date());
+  });
+}
+
+function processSchedulerActions(now) {
+  var matches = getMatches();
+  var picks = getPicks();
+  getSchedulerActions(matches, picks, now).forEach(function (action) {
+    var match = getMatchById(action.matchId);
+    if (!match) return;
+    if (action.type === ACTIONS.OPEN_PICK) openMatch(match.matchId, "scheduler");
+    if (action.type === ACTIONS.ODDS_ALERT) alertMissingOdds(match);
+    if (action.type === ACTIONS.REMIND_MISSING) remindMissing(match);
+    if (action.type === ACTIONS.LOCK_MATCH) lockMatch(match.matchId, "scheduler");
+    if (action.type === ACTIONS.PROMPT_RESULT) promptResult(match);
   });
 }
 
@@ -104,6 +107,8 @@ function handleMessage(message) {
   if (command.name === "set_player_active") return adminSetPlayerActive(chatId, message.from.id, command.args);
   if (command.name === "add_match") return adminAddMatch(chatId, message.from.id, command.args);
   if (command.name === "set_match_time") return adminSetMatchTime(chatId, message.from.id, command.args);
+  if (command.name === "reset_sheet") return adminResetSheet(chatId);
+  if (command.name === "dryrun") return adminDryRun(chatId, message.from.id, command.args);
   if (command.name === "open") return openMatch(command.args[0], message.from.id, chatId);
   if (command.name === "lock") return lockMatch(command.args[0], message.from.id, chatId);
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
@@ -173,13 +178,20 @@ function adminSetMatchTime(chatId, actor, args) {
 function handleCallbackQuery(callbackQuery) {
   var chatId = callbackQuery.message.chat.id;
   var telegramUserId = String(callbackQuery.from.id);
+  var data = parseCallbackData(callbackQuery.data);
+  var admin = isAdminChatId(chatId) || isAdminChatId(telegramUserId);
+
+  if (data.action === "reset_select" || data.action === "reset_confirm" || data.action === "reset_cancel") {
+    handleResetSheetCallback(callbackQuery, data, admin);
+    return;
+  }
+
   var player = getPlayerByTelegramId(telegramUserId);
   if (!player || player.active === false || String(player.active).toLowerCase() === "false") {
     answerCallbackQuery(callbackQuery.id, "Bạn chưa có trong danh sách người chơi.");
     return;
   }
 
-  var data = parseCallbackData(callbackQuery.data);
   var match = getMatchById(data.matchId);
   if (!match) {
     answerCallbackQuery(callbackQuery.id, "Không tìm thấy trận.");
@@ -214,6 +226,66 @@ function handleCallbackQuery(callbackQuery) {
   }
 }
 
+function adminResetSheet(chatId) {
+  sendTelegramMessage(chatId, "Chọn sheet cần reset. Bot sẽ hỏi xác nhận trước khi xóa dữ liệu.", buildResetSheetKeyboard(getSheetNames()));
+}
+
+function handleResetSheetCallback(callbackQuery, data, admin) {
+  var chatId = callbackQuery.message.chat.id;
+  var sheetName = data.matchId;
+  if (!admin) {
+    answerCallbackQuery(callbackQuery.id, "Chỉ admin được reset sheet.");
+    return;
+  }
+  if (getSheetNames().indexOf(sheetName) === -1) {
+    answerCallbackQuery(callbackQuery.id, "Sheet không hợp lệ.");
+    return;
+  }
+  if (data.action === "reset_select") {
+    answerCallbackQuery(callbackQuery.id, "Xác nhận reset " + sheetName);
+    sendTelegramMessage(chatId, "Xác nhận reset sheet `" + sheetName + "`? Dữ liệu dưới header sẽ bị xóa.", buildResetSheetConfirmKeyboard(sheetName));
+    return;
+  }
+  if (data.action === "reset_cancel") {
+    answerCallbackQuery(callbackQuery.id, "Đã hủy.");
+    sendTelegramMessage(chatId, "Đã hủy reset sheet " + sheetName + ".");
+    return;
+  }
+  if (data.action === "reset_confirm") {
+    var result = resetSheetData(sheetName, callbackQuery.from.id);
+    answerCallbackQuery(callbackQuery.id, result.ok ? "Đã reset." : "Reset thất bại.");
+    sendTelegramMessage(chatId, result.ok ? "Đã reset sheet " + sheetName + " (" + result.clearedRows + " rows)." : "Không reset được sheet " + sheetName + ".");
+  }
+}
+
+function adminDryRun(chatId, actor, args) {
+  var baseTimeUtc = args[0] || new Date().toISOString();
+  if (Number.isNaN(toDate(baseTimeUtc).getTime())) {
+    sendTelegramMessage(chatId, "Cú pháp: /dryrun [baseTimeUtc]. Ví dụ: /dryrun 2026-06-12T00:00:00.000Z");
+    return;
+  }
+  var matches;
+  var source = "AI";
+  try {
+    matches = generateAiDryRunMatches(baseTimeUtc);
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    matches = buildDryRunMatches(baseTimeUtc);
+    source = "fallback";
+  }
+  var result = appendMatches(matches, actor);
+  processSchedulerActions(toDate(baseTimeUtc));
+  sendTelegramMessage(
+    chatId,
+    [
+      "Đã tạo dry-run data bằng " + source + ".",
+      "Created: " + (result.created.length ? result.created.join(", ") : "none"),
+      "Skipped existing: " + (result.skipped.length ? result.skipped.join(", ") : "none"),
+      "Đã chạy scheduler một lượt; dùng /matches để xem các trận đã mở pick.",
+    ].join("\n")
+  );
+}
+
 function sendOpenMatches(chatId) {
   var matches = getMatches().filter(function (match) {
     return match.status === STATUSES.OPEN;
@@ -234,6 +306,20 @@ function sendOpenMatches(chatId) {
 function sendMyPick(chatId, player, matchId) {
   if (!player) {
     sendTelegramMessage(chatId, "Bạn chưa có trong danh sách người chơi.");
+    return;
+  }
+  if (!matchId) {
+    var playerPicks = getPicks().filter(function (pick) {
+      return String(pick.telegramUserId) === String(player.telegramUserId);
+    });
+    sendTelegramMessage(
+      chatId,
+      formatMyUpcomingPicks({
+        now: new Date(),
+        matches: getMatches(),
+        picks: playerPicks,
+      })
+    );
     return;
   }
   var targetMatchId = matchId || (getMatches().find(function (match) { return match.status === STATUSES.OPEN; }) || {}).matchId;
