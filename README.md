@@ -138,7 +138,25 @@ Examples:
 
 Use `_` for spaces in team names when needed; the bot stores `_` as spaces.
 
-`/reset_sheet` shows sheet-name buttons and asks for confirmation before clearing data rows. It keeps headers and protection in place. `/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases, inserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. If the AI call fails, the bot uses a deterministic fallback set.
+`/reset_sheet` shows sheet-name buttons and asks for confirmation before clearing data rows. It keeps headers and protection in place.
+
+### `/dryrun` parameter
+
+Syntax:
+
+```text
+/dryrun [baseTimeUtc]
+```
+
+`baseTimeUtc` is optional. Use an ISO-8601 UTC timestamp with `Z`, for example:
+
+```text
+/dryrun 2026-06-12T00:00:00.000Z
+```
+
+If omitted, the bot uses the current time when the command runs. The generated matches are scheduled relative to `baseTimeUtc`, with enough cases to test orchestration: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one scheduled match without odds to trigger the missing-odds alert.
+
+`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases, inserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. If the AI call fails, the bot uses a deterministic fallback set. It does not clear existing data; existing `matchId`s are skipped, so use `/reset_sheet` first when you want a clean test run.
 
 ## Telegram Spam / Retry Recovery
 

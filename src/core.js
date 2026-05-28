@@ -220,7 +220,7 @@ function formatCommands(isAdmin) {
       "/settle <matchId> - Chốt điểm",
       "/recap <matchId> - Gửi lại recap",
       "/reset_sheet - Reset dữ liệu sheet",
-      "/dryrun [baseTimeUtc] - Tạo dữ liệu mô phỏng",
+      "/dryrun [baseTimeUtc ISO UTC] - Tạo dữ liệu mô phỏng",
     ]);
   }
 

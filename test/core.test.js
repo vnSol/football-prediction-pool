@@ -259,7 +259,7 @@ test("formats commands by account role", () => {
 
   assert.match(adminCommands, /\/matches/);
   assert.match(adminCommands, /\/set_odds/);
-  assert.match(adminCommands, /\/dryrun/);
+  assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
 });
 
 test("formats all picks in the next six hours for a player", () => {
