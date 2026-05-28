@@ -1,0 +1,442 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const {
+  ACTIONS,
+  SELECTIONS,
+  STATUSES,
+  canChangePick,
+  createDefaultPicks,
+  buildPickKeyboard,
+  formatKickoffTime,
+  formatLeaderboard,
+  formatHandicap,
+  formatRecap,
+  getSchedulerActions,
+  getTelegramUpdateDedupeKey,
+  parseAddMatchArgs,
+  parseAddPlayerArgs,
+  buildAiRecapPrompt,
+  buildLockDramaPrompt,
+  buildLockedBettingFacts,
+  parseCallbackData,
+  parseTelegramCommand,
+  scorePick,
+} = require("../src/core");
+
+function date(value) {
+  return new Date(value);
+}
+
+const players = [
+  { telegramUserId: "101", displayName: "An", active: true },
+  { telegramUserId: "102", displayName: "Binh", active: true },
+  { telegramUserId: "103", displayName: "Chi", active: false },
+];
+
+test("allows pick changes before kickoff and rejects them at kickoff", () => {
+  const match = {
+    matchId: "M001",
+    status: STATUSES.OPEN,
+    kickoffUtc: "2026-06-12T19:00:00.000Z",
+  };
+
+  assert.equal(canChangePick(match, date("2026-06-12T18:59:59.000Z")), true);
+  assert.equal(canChangePick(match, date("2026-06-12T19:00:00.000Z")), false);
+  assert.equal(
+    canChangePick({ ...match, status: STATUSES.LOCKED }, date("2026-06-12T18:00:00.000Z")),
+    false
+  );
+});
+
+test("scores group-stage picks after applying handicap", () => {
+  const match = {
+    matchId: "M001",
+    stage: "GROUP",
+    homeTeam: "Brazil",
+    awayTeam: "Japan",
+    handicapSide: SELECTIONS.HOME,
+    handicapGoals: -0.5,
+  };
+  const score = { homeScore: 1, awayScore: 1 };
+
+  assert.deepEqual(scorePick(match, { selection: SELECTIONS.AWAY, star: false }, score), {
+    correct: true,
+    points: 1,
+    outcome: SELECTIONS.AWAY,
+  });
+  assert.deepEqual(scorePick(match, { selection: SELECTIONS.HOME, star: false }, score), {
+    correct: false,
+    points: 0,
+    outcome: SELECTIONS.AWAY,
+  });
+});
+
+test("scores knockout star picks with bonus and penalty", () => {
+  const match = {
+    matchId: "R16-01",
+    stage: "KNOCKOUT",
+    homeTeam: "France",
+    awayTeam: "Spain",
+    handicapSide: SELECTIONS.AWAY,
+    handicapGoals: -0.25,
+  };
+  const score = { homeScore: 2, awayScore: 1 };
+
+  assert.deepEqual(scorePick(match, { selection: SELECTIONS.HOME, star: true }, score), {
+    correct: true,
+    points: 2,
+    outcome: SELECTIONS.HOME,
+  });
+  assert.deepEqual(scorePick(match, { selection: SELECTIONS.AWAY, star: true }, score), {
+    correct: false,
+    points: -1,
+    outcome: SELECTIONS.HOME,
+  });
+  assert.deepEqual(scorePick(match, { selection: SELECTIONS.AWAY, star: false }, score), {
+    correct: false,
+    points: 0,
+    outcome: SELECTIONS.HOME,
+  });
+});
+
+test("creates default picks for active players who missed kickoff", () => {
+  const match = {
+    matchId: "M002",
+    favoriteSide: SELECTIONS.AWAY,
+  };
+  const existingPicks = [
+    { matchId: "M002", telegramUserId: "101", selection: SELECTIONS.DRAW },
+  ];
+
+  assert.deepEqual(createDefaultPicks(match, players, existingPicks, date("2026-06-12T19:00:00.000Z")), [
+    {
+      matchId: "M002",
+      telegramUserId: "102",
+      selection: SELECTIONS.AWAY,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+  ]);
+});
+
+test("scheduler opens, alerts, reminds, locks, and prompts for result", () => {
+  const now = date("2026-06-12T13:00:00.000Z");
+  const matches = [
+    {
+      matchId: "OPEN-ME",
+      status: STATUSES.SCHEDULED,
+      kickoffUtc: "2026-06-12T19:00:00.000Z",
+      handicapGoals: -0.5,
+      favoriteSide: SELECTIONS.HOME,
+    },
+    {
+      matchId: "NEEDS-ODDS",
+      status: STATUSES.SCHEDULED,
+      kickoffUtc: "2026-06-12T18:30:00.000Z",
+    },
+    {
+      matchId: "REMIND-ME",
+      status: STATUSES.OPEN,
+      kickoffUtc: "2026-06-12T13:30:00.000Z",
+    },
+    {
+      matchId: "LOCK-ME",
+      status: STATUSES.OPEN,
+      kickoffUtc: "2026-06-12T12:59:59.000Z",
+      favoriteSide: SELECTIONS.AWAY,
+    },
+    {
+      matchId: "RESULT-ME",
+      status: STATUSES.LOCKED,
+      kickoffUtc: "2026-06-12T10:30:00.000Z",
+    },
+  ];
+
+  const actions = getSchedulerActions(matches, [], now);
+
+  assert.deepEqual(
+    actions.map((action) => [action.type, action.matchId]),
+    [
+      [ACTIONS.OPEN_PICK, "OPEN-ME"],
+      [ACTIONS.ODDS_ALERT, "NEEDS-ODDS"],
+      [ACTIONS.REMIND_MISSING, "REMIND-ME"],
+      [ACTIONS.LOCK_MATCH, "LOCK-ME"],
+      [ACTIONS.PROMPT_RESULT, "RESULT-ME"],
+    ]
+  );
+});
+
+test("formats cheerful recap with match events, scoring changes, and leaderboard", () => {
+  const recap = formatRecap({
+    match: {
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      handicapSide: SELECTIONS.HOME,
+      handicapGoals: -0.5,
+    },
+    score: { homeScore: 2, awayScore: 1 },
+    outcome: SELECTIONS.HOME,
+    events: ["Messi mở tỉ số phút 18", "Germany gỡ hòa trước giờ nghỉ", "Argentina kết liễu ở phút 88"],
+    scoreChanges: [
+      { displayName: "An", points: 2, correct: true, star: true },
+      { displayName: "Binh", points: -1, correct: false, star: true },
+    ],
+    leaderboard: [
+      { displayName: "An", points: 5 },
+      { displayName: "Binh", points: 2 },
+    ],
+  });
+
+  assert.match(recap, /Argentina 2-1 Germany/);
+  assert.match(recap, /Đội thắng kèo: Argentina/);
+  assert.match(recap, /Messi mở tỉ số/);
+  assert.match(recap, /An \+2/);
+  assert.match(recap, /Binh -1/);
+  assert.match(recap, /1\. An - 5 điểm/);
+  assert.match(recap, /không khí bắt đầu nóng/);
+});
+
+test("formats leaderboard in rank order", () => {
+  assert.equal(
+    formatLeaderboard([
+      { displayName: "An", points: 4 },
+      { displayName: "Binh", points: 3 },
+    ]),
+    "🏆 Leaderboard\n1. An - 4 điểm\n2. Binh - 3 điểm"
+  );
+});
+
+test("formats handicap as positive odds with favorite first", () => {
+  assert.equal(
+    formatHandicap({
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      favoriteSide: SELECTIONS.HOME,
+      handicapGoals: 0.5,
+    }),
+    "Argentina chấp Germany 0.5 Trái"
+  );
+});
+
+test("formats negative handicap by reversing the favorite side", () => {
+  assert.equal(
+    formatHandicap({
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      favoriteSide: SELECTIONS.HOME,
+      handicapSide: SELECTIONS.HOME,
+      handicapGoals: -0.5,
+    }),
+    "Germany chấp Argentina 0.5 Trái"
+  );
+});
+
+test("parses Telegram slash commands", () => {
+  assert.deepEqual(parseTelegramCommand("/set_odds M001 HOME -0.5"), {
+    name: "set_odds",
+    args: ["M001", "HOME", "-0.5"],
+  });
+  assert.deepEqual(parseTelegramCommand("/leaderboard"), {
+    name: "leaderboard",
+    args: [],
+  });
+});
+
+test("parses callback data and builds pick keyboard", () => {
+  assert.deepEqual(parseCallbackData("pick|M001|DRAW"), {
+    action: "pick",
+    matchId: "M001",
+    value: "DRAW",
+  });
+
+  const keyboard = buildPickKeyboard({
+    matchId: "M001",
+    stage: "KNOCKOUT",
+    homeTeam: "Brazil",
+    awayTeam: "Japan",
+  });
+
+  assert.deepEqual(keyboard.inline_keyboard[0], [
+    { text: "Brazil", callback_data: "pick|M001|HOME" },
+    { text: "Hòa", callback_data: "pick|M001|DRAW" },
+    { text: "Japan", callback_data: "pick|M001|AWAY" },
+  ]);
+  assert.deepEqual(keyboard.inline_keyboard[1], [
+    { text: "⭐ Ngôi sao hi vọng", callback_data: "star|M001|toggle" },
+  ]);
+});
+
+test("omits draw button when handicap is not a whole number", () => {
+  const keyboard = buildPickKeyboard({
+    matchId: "M001",
+    stage: "GROUP",
+    homeTeam: "Brazil",
+    awayTeam: "Japan",
+    handicapGoals: 0.5,
+  });
+
+  assert.deepEqual(keyboard.inline_keyboard[0], [
+    { text: "Brazil", callback_data: "pick|M001|HOME" },
+    { text: "Japan", callback_data: "pick|M001|AWAY" },
+  ]);
+});
+
+test("keeps draw button when handicap is a whole number", () => {
+  const keyboard = buildPickKeyboard({
+    matchId: "M001",
+    stage: "GROUP",
+    homeTeam: "Brazil",
+    awayTeam: "Japan",
+    handicapGoals: 1,
+  });
+
+  assert.deepEqual(keyboard.inline_keyboard[0], [
+    { text: "Brazil", callback_data: "pick|M001|HOME" },
+    { text: "Hòa", callback_data: "pick|M001|DRAW" },
+    { text: "Japan", callback_data: "pick|M001|AWAY" },
+  ]);
+});
+
+test("formats kickoff time in GMT+7", () => {
+  assert.equal(formatKickoffTime("2026-06-12T20:00:00.000Z"), "2026-06-13 03:00 GMT+7");
+});
+
+test("builds locked betting facts for AI lock message", () => {
+  assert.deepEqual(
+    buildLockedBettingFacts({
+      match: {
+        matchId: "T001",
+        homeTeam: "Argentina",
+        awayTeam: "Germany",
+        favoriteSide: SELECTIONS.HOME,
+        handicapGoals: 0.5,
+        kickoffUtc: "2026-06-12T20:00:00.000Z",
+      },
+      picks: [
+        { selection: SELECTIONS.HOME, star: false },
+        { selection: SELECTIONS.HOME, star: true },
+        { selection: SELECTIONS.AWAY, star: false },
+      ],
+    }),
+    {
+      matchId: "T001",
+      title: "Argentina vs Germany",
+      kickoff: "2026-06-13 03:00 GMT+7",
+      handicap: "Argentina chấp Germany 0.5 Trái",
+      totalPicks: 3,
+      homePicks: 2,
+      drawPicks: 0,
+      awayPicks: 1,
+      starPicks: 1,
+      drawWasOpen: false,
+    }
+  );
+});
+
+test("builds AI prompts with facts-first constraints", () => {
+  const lockPrompt = buildLockDramaPrompt({
+    facts: {
+      title: "Argentina vs Germany",
+      kickoff: "2026-06-13 03:00 GMT+7",
+      handicap: "Argentina chấp Germany 0.5 Trái",
+      totalPicks: 3,
+      homePicks: 2,
+      drawPicks: 0,
+      awayPicks: 1,
+      starPicks: 1,
+      drawWasOpen: false,
+    },
+  });
+
+  assert.match(lockPrompt, /không bịa/);
+  assert.match(lockPrompt, /ly kì/);
+  assert.match(lockPrompt, /Argentina vs Germany/);
+
+  const recapPrompt = buildAiRecapPrompt({
+    match: {
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      favoriteSide: SELECTIONS.HOME,
+      handicapGoals: 0.5,
+      kickoffUtc: "2026-06-12T20:00:00.000Z",
+    },
+    score: { homeScore: 2, awayScore: 1 },
+    scoreChanges: [{ displayName: "An", points: 1, correct: true, star: false }],
+    leaderboard: [{ displayName: "An", points: 3 }],
+  });
+
+  assert.match(recapPrompt, /tối đa 2 nguồn public/);
+  assert.match(recapPrompt, /tiếng Việt/);
+  assert.match(recapPrompt, /An \+1/);
+});
+
+test("derives stable Telegram update dedupe keys", () => {
+  assert.equal(
+    getTelegramUpdateDedupeKey({
+      update_id: 123,
+      message: { message_id: 99, chat: { id: -1001 }, text: "/matches" },
+    }),
+    "update:123"
+  );
+  assert.equal(
+    getTelegramUpdateDedupeKey({
+      callback_query: { id: "abc123", data: "pick|M001|HOME" },
+    }),
+    "callback:abc123"
+  );
+  assert.equal(getTelegramUpdateDedupeKey({}), "");
+});
+
+test("parses admin add player arguments", () => {
+  assert.deepEqual(parseAddPlayerArgs(["12345", "Viet", "Mai", "Hoang"]), {
+    telegramUserId: "12345",
+    displayName: "Viet Mai Hoang",
+    active: true,
+    isAdmin: false,
+  });
+  assert.equal(parseAddPlayerArgs(["12345"]), null);
+});
+
+test("parses admin add match arguments with vs separator", () => {
+  assert.deepEqual(
+    parseAddMatchArgs([
+      "T001",
+      "2026-06-12T19:00:00.000Z",
+      "GROUP",
+      "Argentina",
+      "vs",
+      "Germany",
+    ]),
+    {
+      matchId: "T001",
+      kickoffUtc: "2026-06-12T19:00:00.000Z",
+      stage: "GROUP",
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      status: STATUSES.SCHEDULED,
+    }
+  );
+  assert.deepEqual(
+    parseAddMatchArgs([
+      "T002",
+      "2026-06-13T02:00:00.000Z",
+      "KNOCKOUT",
+      "United_States",
+      "vs",
+      "South_Korea",
+    ]),
+    {
+      matchId: "T002",
+      kickoffUtc: "2026-06-13T02:00:00.000Z",
+      stage: "KNOCKOUT",
+      homeTeam: "United States",
+      awayTeam: "South Korea",
+      status: STATUSES.SCHEDULED,
+    }
+  );
+  assert.equal(parseAddMatchArgs(["T001", "not-a-date", "GROUP", "A", "vs", "B"]), null);
+  assert.equal(parseAddMatchArgs(["T001", "2026-06-12T19:00:00.000Z", "GROUP", "A"]), null);
+});

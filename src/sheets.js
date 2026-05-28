@@ -1,0 +1,324 @@
+var SHEETS = Object.freeze({
+  PLAYERS: "Players",
+  MATCHES: "Matches",
+  PICKS: "Picks",
+  SCORES: "Scores",
+  AUDIT: "AuditLog",
+  CONFIG: "Config",
+});
+
+var SHEET_HEADERS = {};
+SHEET_HEADERS[SHEETS.PLAYERS] = ["telegramUserId", "displayName", "active", "isAdmin"];
+SHEET_HEADERS[SHEETS.MATCHES] = [
+  "matchId",
+  "homeTeam",
+  "awayTeam",
+  "kickoffUtc",
+  "stage",
+  "status",
+  "favoriteSide",
+  "handicapSide",
+  "handicapGoals",
+  "oddsLockedAt",
+  "oddsAlertedAt",
+  "openedAt",
+  "reminded30At",
+  "lockedAt",
+  "adminResultPromptedAt",
+  "finalHomeScore",
+  "finalAwayScore",
+  "finalSummary",
+  "handicapOutcome",
+  "settledAt",
+];
+SHEET_HEADERS[SHEETS.PICKS] = [
+  "matchId",
+  "telegramUserId",
+  "displayName",
+  "selection",
+  "star",
+  "source",
+  "createdAt",
+  "updatedAt",
+];
+SHEET_HEADERS[SHEETS.SCORES] = [
+  "matchId",
+  "telegramUserId",
+  "displayName",
+  "selection",
+  "star",
+  "correct",
+  "points",
+  "outcome",
+  "settledAt",
+];
+SHEET_HEADERS[SHEETS.AUDIT] = ["timestamp", "actor", "action", "entityType", "entityId", "beforeJson", "afterJson"];
+SHEET_HEADERS[SHEETS.CONFIG] = ["key", "value"];
+
+function getSpreadsheet() {
+  var spreadsheetId = getScriptProperty(PROPERTY_KEYS.SPREADSHEET_ID, false);
+  if (spreadsheetId) return SpreadsheetApp.openById(spreadsheetId);
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function setupWorkbook() {
+  Object.keys(SHEET_HEADERS).forEach(function (sheetName) {
+    var sheet = ensureSheet(sheetName);
+    ensureHeaders(sheet, SHEET_HEADERS[sheetName]);
+    protectSheet(sheet);
+  });
+}
+
+function ensureSheet(sheetName) {
+  var spreadsheet = getSpreadsheet();
+  return spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
+}
+
+function ensureHeaders(sheet, headers) {
+  var range = sheet.getRange(1, 1, 1, headers.length);
+  var existing = range.getValues()[0];
+  var needsWrite = headers.some(function (header, index) {
+    return existing[index] !== header;
+  });
+  if (needsWrite) {
+    range.setValues([headers]);
+    sheet.setFrozenRows(1);
+  }
+}
+
+function protectSheet(sheet) {
+  var protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  var protection = protections.length ? protections[0] : sheet.protect();
+  protection.setDescription("Locked for Telegram bot writes only");
+  try {
+    protection.removeEditors(protection.getEditors());
+  } catch (error) {
+    // Apps Script owner cannot always remove all inherited editors.
+  }
+  if (protection.canDomainEdit()) protection.setDomainEdit(false);
+}
+
+function readObjects(sheetName) {
+  var sheet = ensureSheet(sheetName);
+  ensureHeaders(sheet, SHEET_HEADERS[sheetName]);
+  var values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return [];
+  var headers = values[0];
+  return values.slice(1).filter(rowHasData).map(function (row) {
+    var object = {};
+    headers.forEach(function (header, index) {
+      object[header] = normalizeCell(row[index]);
+    });
+    return object;
+  });
+}
+
+function normalizeCell(value) {
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
+
+function rowHasData(row) {
+  return row.some(function (value) {
+    return value !== "" && value !== null;
+  });
+}
+
+function appendObject(sheetName, object) {
+  var sheet = ensureSheet(sheetName);
+  var headers = SHEET_HEADERS[sheetName];
+  ensureHeaders(sheet, headers);
+  sheet.appendRow(headers.map(function (header) {
+    return object[header] == null ? "" : object[header];
+  }));
+}
+
+function appendAuditedObject(sheetName, object, actor, action, entityType, entityId) {
+  appendObject(sheetName, object);
+  audit(action, entityType, entityId, actor, null, object);
+}
+
+function updateObject(sheetName, matcher, patch) {
+  var sheet = ensureSheet(sheetName);
+  var headers = SHEET_HEADERS[sheetName];
+  var values = sheet.getDataRange().getValues();
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var current = rowToObject(headers, values[rowIndex]);
+    if (matcher(current)) {
+      var next = Object.assign({}, current, patch);
+      sheet.getRange(rowIndex + 1, 1, 1, headers.length).setValues([
+        headers.map(function (header) {
+          return next[header] == null ? "" : next[header];
+        }),
+      ]);
+      return { before: current, after: next };
+    }
+  }
+  return null;
+}
+
+function rowToObject(headers, row) {
+  var object = {};
+  headers.forEach(function (header, index) {
+    object[header] = normalizeCell(row[index]);
+  });
+  return object;
+}
+
+function getActivePlayers() {
+  return readObjects(SHEETS.PLAYERS).filter(function (player) {
+    return player.active !== false && String(player.active).toLowerCase() !== "false";
+  });
+}
+
+function getPlayerByTelegramId(telegramUserId) {
+  return readObjects(SHEETS.PLAYERS).find(function (player) {
+    return String(player.telegramUserId) === String(telegramUserId);
+  });
+}
+
+function addPlayer(player, actor) {
+  var existing = getPlayerByTelegramId(player.telegramUserId);
+  if (existing) return { ok: false, reason: "exists", player: existing };
+  appendAuditedObject(SHEETS.PLAYERS, player, actor, "ADD_PLAYER", "Player", player.telegramUserId);
+  return { ok: true, player: player };
+}
+
+function setPlayerActive(telegramUserId, active, actor) {
+  var result = updateObject(
+    SHEETS.PLAYERS,
+    function (player) {
+      return String(player.telegramUserId) === String(telegramUserId);
+    },
+    { active: Boolean(active) }
+  );
+  if (result) audit("SET_PLAYER_ACTIVE", "Player", telegramUserId, actor, result.before, result.after);
+  return result;
+}
+
+function getMatches() {
+  return readObjects(SHEETS.MATCHES);
+}
+
+function getMatchById(matchId) {
+  return getMatches().find(function (match) {
+    return String(match.matchId) === String(matchId);
+  });
+}
+
+function addMatch(match, actor) {
+  var existing = getMatchById(match.matchId);
+  if (existing) return { ok: false, reason: "exists", match: existing };
+  appendAuditedObject(SHEETS.MATCHES, match, actor, "ADD_MATCH", "Match", match.matchId);
+  return { ok: true, match: match };
+}
+
+function updateMatch(matchId, patch, actor, action) {
+  var result = updateObject(
+    SHEETS.MATCHES,
+    function (match) {
+      return String(match.matchId) === String(matchId);
+    },
+    patch
+  );
+  if (result) audit(action || "UPDATE_MATCH", "Match", matchId, actor || "system", result.before, result.after);
+  return result;
+}
+
+function getPicks() {
+  return readObjects(SHEETS.PICKS).map(function (pick) {
+    pick.star = parseBoolean(pick.star);
+    return pick;
+  });
+}
+
+function getPick(matchId, telegramUserId) {
+  return getPicks().find(function (pick) {
+    return String(pick.matchId) === String(matchId) && String(pick.telegramUserId) === String(telegramUserId);
+  });
+}
+
+function upsertPick(match, player, selection, star, source, actor) {
+  var now = new Date().toISOString();
+  var existing = getPick(match.matchId, player.telegramUserId);
+  var payload = {
+    matchId: match.matchId,
+    telegramUserId: String(player.telegramUserId),
+    displayName: player.displayName,
+    selection: selection,
+    star: Boolean(star),
+    source: source,
+    updatedAt: now,
+  };
+
+  if (existing) {
+    var result = updateObject(
+      SHEETS.PICKS,
+      function (pick) {
+        return String(pick.matchId) === String(match.matchId) && String(pick.telegramUserId) === String(player.telegramUserId);
+      },
+      payload
+    );
+    audit("CHANGE_PICK", "Pick", match.matchId + ":" + player.telegramUserId, actor, result.before, result.after);
+    return result.after;
+  }
+
+  payload.createdAt = now;
+  appendObject(SHEETS.PICKS, payload);
+  audit("CREATE_PICK", "Pick", match.matchId + ":" + player.telegramUserId, actor, null, payload);
+  return payload;
+}
+
+function appendScoreRows(rows) {
+  rows.forEach(function (row) {
+    appendObject(SHEETS.SCORES, row);
+  });
+}
+
+function getLeaderboard() {
+  var playersById = {};
+  readObjects(SHEETS.PLAYERS).forEach(function (player) {
+    playersById[String(player.telegramUserId)] = player;
+  });
+
+  var totals = {};
+  readObjects(SHEETS.SCORES).forEach(function (score) {
+    var id = String(score.telegramUserId);
+    if (!totals[id]) {
+      totals[id] = {
+        telegramUserId: id,
+        displayName: score.displayName || (playersById[id] && playersById[id].displayName) || id,
+        points: 0,
+      };
+    }
+    totals[id].points += Number(score.points || 0);
+  });
+
+  return sortLeaderboard(
+    Object.keys(totals).map(function (id) {
+      return totals[id];
+    })
+  );
+}
+
+function audit(action, entityType, entityId, actor, before, after) {
+  appendObject(SHEETS.AUDIT, {
+    timestamp: new Date().toISOString(),
+    actor: actor || "system",
+    action: action,
+    entityType: entityType,
+    entityId: entityId,
+    beforeJson: before ? JSON.stringify(before) : "",
+    afterJson: after ? JSON.stringify(after) : "",
+  });
+}
+
+function withScriptLock(callback) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
+}

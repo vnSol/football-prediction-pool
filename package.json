@@ -1,0 +1,10 @@
+{
+  "name": "world-cup-telegram-prediction-pool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Google Apps Script + Telegram prediction pool automation for World Cup team games.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  }
+}

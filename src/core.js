@@ -1,0 +1,483 @@
+var SELECTIONS = Object.freeze({
+  HOME: "HOME",
+  DRAW: "DRAW",
+  AWAY: "AWAY",
+});
+
+var STATUSES = Object.freeze({
+  SCHEDULED: "SCHEDULED",
+  OPEN: "OPEN",
+  LOCKED: "LOCKED",
+  SETTLED: "SETTLED",
+  CANCELLED: "CANCELLED",
+});
+
+var ACTIONS = Object.freeze({
+  OPEN_PICK: "OPEN_PICK",
+  ODDS_ALERT: "ODDS_ALERT",
+  REMIND_MISSING: "REMIND_MISSING",
+  LOCK_MATCH: "LOCK_MATCH",
+  PROMPT_RESULT: "PROMPT_RESULT",
+});
+
+var SOURCE = Object.freeze({
+  TELEGRAM: "telegram",
+  AUTO_DEFAULT: "auto_default",
+  ADMIN: "admin",
+});
+
+function toDate(value) {
+  return value instanceof Date ? value : new Date(value);
+}
+
+function toIso(value) {
+  return toDate(value).toISOString();
+}
+
+function isValidSelection(selection) {
+  return selection === SELECTIONS.HOME || selection === SELECTIONS.DRAW || selection === SELECTIONS.AWAY;
+}
+
+function sideName(match, side) {
+  if (side === SELECTIONS.HOME) return match.homeTeam || "Đội nhà";
+  if (side === SELECTIONS.AWAY) return match.awayTeam || "Đội khách";
+  return "Hòa";
+}
+
+function isKnockout(match) {
+  return String(match.stage || "").toUpperCase() !== "GROUP";
+}
+
+function hasLockedOdds(match) {
+  return isValidSelection(match.favoriteSide) && isFinite(Number(match.handicapGoals));
+}
+
+function canChangePick(match, now) {
+  if (!match || match.status !== STATUSES.OPEN) return false;
+  return toDate(now).getTime() < toDate(match.kickoffUtc).getTime();
+}
+
+function getHandicapOutcome(match, score) {
+  var homeAdjusted = Number(score.homeScore);
+  var awayAdjusted = Number(score.awayScore);
+  var handicap = Number(match.handicapGoals || 0);
+  var handicapSide = match.handicapSide || match.favoriteSide;
+
+  if (handicapSide === SELECTIONS.HOME) homeAdjusted += handicap;
+  if (handicapSide === SELECTIONS.AWAY) awayAdjusted += handicap;
+
+  if (Math.abs(homeAdjusted - awayAdjusted) < 0.000001) return SELECTIONS.DRAW;
+  return homeAdjusted > awayAdjusted ? SELECTIONS.HOME : SELECTIONS.AWAY;
+}
+
+function scorePick(match, pick, score) {
+  var outcome = getHandicapOutcome(match, score);
+  var correct = pick.selection === outcome;
+  var star = Boolean(pick.star) && isKnockout(match);
+  var points = correct ? (star ? 2 : 1) : star ? -1 : 0;
+
+  return {
+    correct: correct,
+    points: points,
+    outcome: outcome,
+  };
+}
+
+function createDefaultPicks(match, players, existingPicks, now) {
+  var existing = {};
+  existingPicks
+    .filter(function (pick) {
+      return pick.matchId === match.matchId;
+    })
+    .forEach(function (pick) {
+      existing[String(pick.telegramUserId)] = true;
+    });
+
+  return players
+    .filter(function (player) {
+      return player.active !== false && !existing[String(player.telegramUserId)];
+    })
+    .map(function (player) {
+      return {
+        matchId: match.matchId,
+        telegramUserId: String(player.telegramUserId),
+        selection: match.favoriteSide,
+        star: false,
+        source: SOURCE.AUTO_DEFAULT,
+        createdAt: toIso(now),
+        updatedAt: toIso(now),
+      };
+    });
+}
+
+function minutesUntil(match, now) {
+  return (toDate(match.kickoffUtc).getTime() - toDate(now).getTime()) / 60000;
+}
+
+function hoursUntil(match, now) {
+  return minutesUntil(match, now) / 60;
+}
+
+function getSchedulerActions(matches, picks, now) {
+  var actions = [];
+
+  matches.forEach(function (match) {
+    if (match.status === STATUSES.CANCELLED || match.status === STATUSES.SETTLED) return;
+
+    var untilMinutes = minutesUntil(match, now);
+    var untilHours = hoursUntil(match, now);
+
+    if (match.status === STATUSES.SCHEDULED && untilHours <= 6 && untilMinutes > 0) {
+      actions.push({
+        type: hasLockedOdds(match) ? ACTIONS.OPEN_PICK : ACTIONS.ODDS_ALERT,
+        matchId: match.matchId,
+      });
+      return;
+    }
+
+    if (match.status === STATUSES.OPEN && untilMinutes <= 0) {
+      actions.push({
+        type: ACTIONS.LOCK_MATCH,
+        matchId: match.matchId,
+      });
+      return;
+    }
+
+    if (match.status === STATUSES.OPEN && untilMinutes <= 30 && untilMinutes > 0 && !match.reminded30At) {
+      actions.push({
+        type: ACTIONS.REMIND_MISSING,
+        matchId: match.matchId,
+      });
+      return;
+    }
+
+    if (
+      match.status === STATUSES.LOCKED &&
+      untilMinutes <= -120 &&
+      !match.adminResultPromptedAt &&
+      (match.finalHomeScore === "" || match.finalHomeScore == null || match.finalAwayScore === "" || match.finalAwayScore == null)
+    ) {
+      actions.push({
+        type: ACTIONS.PROMPT_RESULT,
+        matchId: match.matchId,
+      });
+    }
+  });
+
+  return actions;
+}
+
+function sortLeaderboard(rows) {
+  return rows.slice().sort(function (a, b) {
+    if (Number(b.points) !== Number(a.points)) return Number(b.points) - Number(a.points);
+    return String(a.displayName).localeCompare(String(b.displayName));
+  });
+}
+
+function formatLeaderboard(rows, limit) {
+  var topRows = sortLeaderboard(rows).slice(0, limit || rows.length);
+  if (topRows.length === 0) return "🏆 Leaderboard\nChưa có điểm nào.";
+  return (
+    "🏆 Leaderboard\n" +
+    topRows
+      .map(function (row, index) {
+        return index + 1 + ". " + row.displayName + " - " + Number(row.points) + " điểm";
+      })
+      .join("\n")
+  );
+}
+
+function formatPoints(points) {
+  return Number(points) > 0 ? "+" + Number(points) : String(Number(points));
+}
+
+function buildLockedBettingFacts(input) {
+  var match = input.match;
+  var picks = input.picks || [];
+  return {
+    matchId: match.matchId,
+    title: sideName(match, SELECTIONS.HOME) + " vs " + sideName(match, SELECTIONS.AWAY),
+    kickoff: formatKickoffTime(match.kickoffUtc),
+    handicap: formatHandicap(match),
+    totalPicks: picks.length,
+    homePicks: picks.filter(function (pick) { return pick.selection === SELECTIONS.HOME; }).length,
+    drawPicks: picks.filter(function (pick) { return pick.selection === SELECTIONS.DRAW; }).length,
+    awayPicks: picks.filter(function (pick) { return pick.selection === SELECTIONS.AWAY; }).length,
+    starPicks: picks.filter(function (pick) { return parseBoolean(pick.star); }).length,
+    drawWasOpen: shouldShowDrawOption(match),
+  };
+}
+
+function buildLockDramaPrompt(input) {
+  var facts = input.facts;
+  return [
+    "Bạn là người dẫn chương trình cho một game dự đoán World Cup nội bộ.",
+    "Hãy viết một tin nhắn Telegram bằng tiếng Việt sau khi trận đã khóa pick.",
+    "Giọng điệu: ly kì, hồi hộp, vui vẻ, cà khịa thân thiện, không công kích cá nhân.",
+    "Chỉ dùng các facts dưới đây, không bịa thêm cầu thủ, bàn thắng hoặc diễn biến trận.",
+    "Độ dài: 5-8 dòng, dễ đọc trong Telegram.",
+    "",
+    "Facts:",
+    "- Trận: " + facts.title,
+    "- Giờ đá: " + facts.kickoff,
+    "- Kèo: " + facts.handicap,
+    "- Tổng pick: " + facts.totalPicks,
+    "- Pick đội nhà: " + facts.homePicks,
+    "- Pick hòa: " + facts.drawPicks + (facts.drawWasOpen ? "" : " (cửa hòa không mở vì kèo không tròn)"),
+    "- Pick đội khách: " + facts.awayPicks,
+    "- Ngôi sao hi vọng: " + facts.starPicks,
+  ].join("\n");
+}
+
+function buildAiRecapPrompt(input) {
+  var match = input.match;
+  var score = input.score;
+  var scoreChanges = input.scoreChanges || [];
+  var leaderboard = input.leaderboard || [];
+  return [
+    "Bạn là biên tập viên thể thao cho một game dự đoán World Cup nội bộ.",
+    "Hãy đọc tối đa 2 nguồn public về diễn biến trận đấu này bằng web search, rồi viết recap tiếng Việt.",
+    "Ưu tiên nguồn chính thống/có uy tín như FIFA, ESPN, BBC, Reuters, AP hoặc trang giải đấu.",
+    "Nếu không tìm thấy nguồn đủ rõ, không bịa diễn biến; hãy viết recap dựa trên facts đã cung cấp và nói diễn biến chi tiết chưa đủ dữ liệu.",
+    "Giọng điệu: vui vẻ, hào hứng, cà khịa thân thiện, không xúc phạm cá nhân.",
+    "Độ dài: 8-12 dòng Telegram.",
+    "Bố cục cần có: diễn biến trận, kết quả kèo, điểm betting, bảng xếp hạng sau trận.",
+    "",
+    "Facts đã xác nhận:",
+    "- Trận: " + sideName(match, SELECTIONS.HOME) + " vs " + sideName(match, SELECTIONS.AWAY),
+    "- Giờ đá: " + formatKickoffTime(match.kickoffUtc),
+    "- Tỉ số final: " + sideName(match, SELECTIONS.HOME) + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + sideName(match, SELECTIONS.AWAY),
+    "- Kèo: " + formatHandicap(match),
+    "",
+    "Điểm betting:",
+    scoreChanges.length
+      ? scoreChanges.map(function (change) {
+          return "- " + change.displayName + " " + formatPoints(change.points) + (change.star ? " ⭐" : "");
+        }).join("\n")
+      : "- Không có thay đổi điểm.",
+    "",
+    "Leaderboard hiện tại:",
+    leaderboard.length
+      ? leaderboard.slice(0, 10).map(function (row, index) {
+          return index + 1 + ". " + row.displayName + " - " + Number(row.points) + " điểm";
+        }).join("\n")
+      : "Chưa có điểm nào.",
+  ].join("\n");
+}
+
+function formatHandicap(match) {
+  var handicap = Number(match.handicapGoals || 0);
+  var handicapSide = match.handicapSide || match.favoriteSide;
+  var givingSide = handicap >= 0 ? handicapSide : oppositeSide(handicapSide);
+  var receivingSide = oppositeSide(givingSide);
+  return sideName(match, givingSide) + " chấp " + sideName(match, receivingSide) + " " + Math.abs(handicap) + " Trái";
+}
+
+function oppositeSide(side) {
+  if (side === SELECTIONS.HOME) return SELECTIONS.AWAY;
+  if (side === SELECTIONS.AWAY) return SELECTIONS.HOME;
+  return SELECTIONS.DRAW;
+}
+
+function formatRecap(input) {
+  var match = input.match;
+  var score = input.score;
+  var events = input.events || [];
+  var scoreChanges = input.scoreChanges || [];
+  var leaderboard = input.leaderboard || [];
+  var outcome = input.outcome || getHandicapOutcome(match, score);
+
+  var eventText =
+    events.length > 0
+      ? events.map(function (event) { return "- " + event; }).join("\n")
+      : "- Chưa có diễn biến chi tiết, nhưng bảng điểm thì đã kịp nóng lên.";
+
+  var changeText =
+    scoreChanges.length > 0
+      ? scoreChanges
+          .map(function (change) {
+            var starText = change.star ? " ⭐" : "";
+            return "- " + change.displayName + " " + formatPoints(change.points) + " điểm" + starText;
+          })
+          .join("\n")
+      : "- Không có thay đổi điểm.";
+
+  return [
+    "🎉 Recap trận đấu",
+    match.homeTeam + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + match.awayTeam,
+    "Kèo: " + formatHandicap(match),
+    "Đội thắng kèo: " + sideName(match, outcome),
+    "",
+    "Diễn biến chính:",
+    eventText,
+    "",
+    "Điểm trận này:",
+    changeText,
+    "",
+    formatLeaderboard(leaderboard, 10),
+    "",
+    "Bảng điểm đang xáo trộn nhẹ, không khí bắt đầu nóng rồi đấy.",
+  ].join("\n");
+}
+
+function parseBoolean(value) {
+  if (value === true || value === false) return value;
+  return String(value || "").toLowerCase() === "true";
+}
+
+function parseTelegramCommand(text) {
+  var parts = String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0 || parts[0].charAt(0) !== "/") return null;
+
+  return {
+    name: parts[0].slice(1).split("@")[0].toLowerCase(),
+    args: parts.slice(1),
+  };
+}
+
+function parseCallbackData(value) {
+  var parts = String(value || "").split("|");
+  return {
+    action: parts[0] || "",
+    matchId: parts[1] || "",
+    value: parts[2] || "",
+  };
+}
+
+function buildPickKeyboard(match) {
+  var pickRow = [
+    { text: sideName(match, SELECTIONS.HOME), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.HOME },
+  ];
+
+  if (shouldShowDrawOption(match)) {
+    pickRow.push({ text: "Hòa", callback_data: "pick|" + match.matchId + "|" + SELECTIONS.DRAW });
+  }
+
+  pickRow.push({ text: sideName(match, SELECTIONS.AWAY), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.AWAY });
+
+  var keyboard = [pickRow];
+
+  if (isKnockout(match)) {
+    keyboard.push([{ text: "⭐ Ngôi sao hi vọng", callback_data: "star|" + match.matchId + "|toggle" }]);
+  }
+
+  return { inline_keyboard: keyboard };
+}
+
+function shouldShowDrawOption(match) {
+  return Number.isInteger(Math.abs(Number(match.handicapGoals || 0)));
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatKickoffTime(value) {
+  var date = toDate(value);
+  var gmt7 = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+  return [
+    gmt7.getUTCFullYear(),
+    "-",
+    pad2(gmt7.getUTCMonth() + 1),
+    "-",
+    pad2(gmt7.getUTCDate()),
+    " ",
+    pad2(gmt7.getUTCHours()),
+    ":",
+    pad2(gmt7.getUTCMinutes()),
+    " GMT+7",
+  ].join("");
+}
+
+function getTelegramUpdateDedupeKey(update) {
+  if (!update) return "";
+  if (update.update_id != null) return "update:" + String(update.update_id);
+  if (update.callback_query && update.callback_query.id) return "callback:" + String(update.callback_query.id);
+  if (update.message && update.message.chat && update.message.message_id != null) {
+    return "message:" + String(update.message.chat.id) + ":" + String(update.message.message_id);
+  }
+  return "";
+}
+
+function normalizeTeamName(value) {
+  return String(value || "").replace(/_/g, " ").trim();
+}
+
+function parseAddPlayerArgs(args) {
+  if (!args || args.length < 2) return null;
+  var telegramUserId = String(args[0] || "").trim();
+  var displayName = args.slice(1).join(" ").trim();
+  if (!telegramUserId || !displayName) return null;
+  return {
+    telegramUserId: telegramUserId,
+    displayName: displayName,
+    active: true,
+    isAdmin: false,
+  };
+}
+
+function parseAddMatchArgs(args) {
+  if (!args || args.length < 6) return null;
+  var matchId = String(args[0] || "").trim();
+  var kickoffUtc = String(args[1] || "").trim();
+  var stage = String(args[2] || "").trim().toUpperCase();
+  var separatorIndex = args
+    .map(function (arg) {
+      return String(arg).toLowerCase();
+    })
+    .indexOf("vs");
+
+  if (!matchId || !kickoffUtc || (stage !== "GROUP" && stage !== "KNOCKOUT")) return null;
+  if (separatorIndex < 4 || separatorIndex === args.length - 1) return null;
+  if (Number.isNaN(toDate(kickoffUtc).getTime())) return null;
+
+  var homeTeam = normalizeTeamName(args.slice(3, separatorIndex).join(" "));
+  var awayTeam = normalizeTeamName(args.slice(separatorIndex + 1).join(" "));
+  if (!homeTeam || !awayTeam) return null;
+
+  return {
+    matchId: matchId,
+    kickoffUtc: toDate(kickoffUtc).toISOString(),
+    stage: stage,
+    homeTeam: homeTeam,
+    awayTeam: awayTeam,
+    status: STATUSES.SCHEDULED,
+  };
+}
+
+if (typeof module !== "undefined") {
+  module.exports = {
+    ACTIONS: ACTIONS,
+    SELECTIONS: SELECTIONS,
+    SOURCE: SOURCE,
+    STATUSES: STATUSES,
+    canChangePick: canChangePick,
+    buildPickKeyboard: buildPickKeyboard,
+    buildAiRecapPrompt: buildAiRecapPrompt,
+    buildLockDramaPrompt: buildLockDramaPrompt,
+    buildLockedBettingFacts: buildLockedBettingFacts,
+    createDefaultPicks: createDefaultPicks,
+    formatHandicap: formatHandicap,
+    formatKickoffTime: formatKickoffTime,
+    formatLeaderboard: formatLeaderboard,
+    formatRecap: formatRecap,
+    getHandicapOutcome: getHandicapOutcome,
+    getSchedulerActions: getSchedulerActions,
+    getTelegramUpdateDedupeKey: getTelegramUpdateDedupeKey,
+    hasLockedOdds: hasLockedOdds,
+    isKnockout: isKnockout,
+    isValidSelection: isValidSelection,
+    parseAddMatchArgs: parseAddMatchArgs,
+    parseAddPlayerArgs: parseAddPlayerArgs,
+    parseCallbackData: parseCallbackData,
+    parseBoolean: parseBoolean,
+    parseTelegramCommand: parseTelegramCommand,
+    scorePick: scorePick,
+    shouldShowDrawOption: shouldShowDrawOption,
+    sideName: sideName,
+    sortLeaderboard: sortLeaderboard,
+  };
+}
