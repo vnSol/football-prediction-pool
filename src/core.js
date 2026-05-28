@@ -559,6 +559,124 @@ function buildAiRecapPrompt(input) {
   ].join("\n");
 }
 
+function buildAiResultProposalPrompt(match) {
+  return [
+    "Bạn là trợ lý vận hành cho game dự đoán World Cup nội bộ.",
+    "Sau T+120 phút, hãy dùng web search như Google để đọc 1-2 nguồn public và đề xuất kết quả cho admin confirm.",
+    "Ưu tiên nguồn chính thống/có uy tín như FIFA, trang giải đấu, ESPN, BBC, Reuters hoặc AP.",
+    "Chỉ đề xuất khi nguồn public đủ rõ; nếu chưa rõ thì status UNKNOWN và homeScore/awayScore là null.",
+    "Không bịa tỉ số, trạng thái, diễn biến hoặc nguồn.",
+    "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
+    "",
+    "Schema:",
+    '{ "status": "FINISHED|LIVE|NOT_STARTED|POSTPONED|CANCELLED|UNKNOWN", "homeScore": number|null, "awayScore": number|null, "summary": "ngắn gọn", "sources": ["https://...", "https://..."] }',
+    "",
+    "Match facts:",
+    "- matchId: " + match.matchId,
+    "- homeTeam: " + sideName(match, SELECTIONS.HOME),
+    "- awayTeam: " + sideName(match, SELECTIONS.AWAY),
+    "- kickoff: " + formatKickoffTime(match.kickoffUtc),
+  ].join("\n");
+}
+
+function normalizeAiResultProposal(result) {
+  var rawStatus = String(result && result.status ? result.status : "UNKNOWN").toUpperCase().replace(/[\s-]+/g, "_");
+  var statusMap = {
+    FT: "FINISHED",
+    FINAL: "FINISHED",
+    FULL_TIME: "FINISHED",
+    FULLTIME: "FINISHED",
+    FINISHED: "FINISHED",
+    LIVE: "LIVE",
+    IN_PROGRESS: "LIVE",
+    ONGOING: "LIVE",
+    NOT_STARTED: "NOT_STARTED",
+    SCHEDULED: "NOT_STARTED",
+    POSTPONED: "POSTPONED",
+    CANCELLED: "CANCELLED",
+    CANCELED: "CANCELLED",
+    UNKNOWN: "UNKNOWN",
+  };
+  var status = statusMap[rawStatus] || "UNKNOWN";
+  var homeScore = normalizeProposalScore(result && result.homeScore);
+  var awayScore = normalizeProposalScore(result && result.awayScore);
+
+  if ((homeScore == null) !== (awayScore == null)) throw new Error("AI result proposal has partial score");
+  if (status === "FINISHED" && (homeScore == null || awayScore == null)) throw new Error("AI result proposal missing final score");
+
+  return {
+    status: status,
+    homeScore: homeScore,
+    awayScore: awayScore,
+    summary: sanitizeProposalText(result && result.summary) || "Chưa có diễn biến đủ rõ từ nguồn public.",
+    sources: normalizeProposalSources(result && (result.sources || result.sourceUrls || result.links)),
+  };
+}
+
+function normalizeProposalScore(value) {
+  if (value === "" || value == null) return null;
+  var score = Number(value);
+  if (!isFinite(score) || score < 0 || Math.floor(score) !== score) throw new Error("AI result proposal invalid score");
+  return score;
+}
+
+function normalizeProposalSources(sources) {
+  if (!Array.isArray(sources)) return [];
+  var urls = [];
+  sources.forEach(function (source) {
+    var url = typeof source === "string" ? source : source && source.url;
+    url = String(url || "").trim();
+    if (/^https?:\/\/\S+$/i.test(url) && urls.indexOf(url) === -1) urls.push(url);
+  });
+  return urls.slice(0, 2);
+}
+
+function sanitizeProposalText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function hasProposalScore(proposal) {
+  return proposal && proposal.homeScore != null && proposal.awayScore != null;
+}
+
+function formatResultProposalStatus(status) {
+  var labels = {
+    FINISHED: "đã kết thúc",
+    LIVE: "đang diễn ra",
+    NOT_STARTED: "chưa bắt đầu",
+    POSTPONED: "bị hoãn",
+    CANCELLED: "bị hủy",
+    UNKNOWN: "chưa rõ",
+  };
+  return labels[status] || "chưa rõ";
+}
+
+function formatAdminResultProposal(match, proposal) {
+  var normalized = normalizeAiResultProposal(proposal || {});
+  var scoreText = hasProposalScore(normalized)
+    ? sideName(match, SELECTIONS.HOME) + " " + normalized.homeScore + "-" + normalized.awayScore + " " + sideName(match, SELECTIONS.AWAY)
+    : "chưa có tỉ số final đủ rõ";
+  var sourceLines = normalized.sources.length
+    ? normalized.sources.map(function (source) { return "- " + source; })
+    : ["- Chưa có link public đủ rõ."];
+  var confirmLine = hasProposalScore(normalized)
+    ? "/result " + match.matchId + " " + normalized.homeScore + "-" + normalized.awayScore + " " + normalized.summary
+    : "Nếu nguồn đã rõ, nhập /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;>";
+
+  return [
+    "🔎 Đề xuất AI/search cho " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
+    "Trạng thái: " + formatResultProposalStatus(normalized.status),
+    "Tỉ số: " + scoreText,
+    "Tóm tắt: " + normalized.summary,
+    "Nguồn để verify:",
+    sourceLines.join("\n"),
+    "",
+    "Admin verify link nguồn rồi confirm:",
+    confirmLine,
+    "Sau đó dùng /settle " + match.matchId + ".",
+  ].join("\n");
+}
+
 function formatHandicap(match) {
   var handicap = Number(match.handicapGoals || 0);
   var handicapSide = match.handicapSide || match.favoriteSide;
@@ -929,6 +1047,7 @@ if (typeof module !== "undefined") {
     canSetOdds: canSetOdds,
     buildPickKeyboard: buildPickKeyboard,
     buildAiRecapPrompt: buildAiRecapPrompt,
+    buildAiResultProposalPrompt: buildAiResultProposalPrompt,
     buildLockDramaPrompt: buildLockDramaPrompt,
     buildLockedBettingFacts: buildLockedBettingFacts,
     createDefaultPicks: createDefaultPicks,
@@ -939,8 +1058,10 @@ if (typeof module !== "undefined") {
     buildFallbackDryRunResult: buildFallbackDryRunResult,
     normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
     normalizeDryRunResult: normalizeDryRunResult,
+    normalizeAiResultProposal: normalizeAiResultProposal,
     formatHandicap: formatHandicap,
     formatCommands: formatCommands,
+    formatAdminResultProposal: formatAdminResultProposal,
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,

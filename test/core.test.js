@@ -11,10 +11,12 @@ const {
   canSetOdds,
   createDefaultPicks,
   buildPickKeyboard,
+  buildAiResultProposalPrompt,
   formatKickoffTime,
   formatLeaderboard,
   formatHandicap,
   formatCommands,
+  formatAdminResultProposal,
   formatOpenMatchMessage,
   formatRecap,
   formatMyUpcomingPicks,
@@ -32,6 +34,7 @@ const {
   buildDryRunResultPrompt,
   normalizeDryRunMatchesForOrchestration,
   normalizeDryRunResult,
+  normalizeAiResultProposal,
   parseCallbackData,
   parseTelegramCommand,
   getDryRunFinishTime,
@@ -733,6 +736,56 @@ test("builds AI prompts with facts-first constraints", () => {
   assert.match(recapPrompt, /lạnh lẽo trên đỉnh/);
   assert.match(recapPrompt, /tăng tốc/);
   assert.match(recapPrompt, /An \+1/);
+});
+
+test("builds AI result proposal prompt for admin confirmation", () => {
+  const prompt = buildAiResultProposalPrompt({
+    matchId: "M001",
+    homeTeam: "Argentina",
+    awayTeam: "Germany",
+    kickoffUtc: "2026-06-12T20:00:00.000Z",
+  });
+
+  assert.match(prompt, /1-2 nguồn public/);
+  assert.match(prompt, /web search như Google/);
+  assert.match(prompt, /JSON/);
+  assert.match(prompt, /không bịa/i);
+  assert.match(prompt, /admin confirm/);
+  assert.match(prompt, /M001/);
+});
+
+test("normalizes and formats AI result proposal for admin verification", () => {
+  const match = {
+    matchId: "M001",
+    homeTeam: "Argentina",
+    awayTeam: "Germany",
+    kickoffUtc: "2026-06-12T20:00:00.000Z",
+  };
+  const proposal = normalizeAiResultProposal({
+    status: "finished",
+    homeScore: "2",
+    awayScore: 1,
+    summary: "Argentina mở tỉ số; Germany gỡ; Argentina thắng cuối trận",
+    sources: ["https://www.fifa.com/match-centre/m001", "https://www.bbc.com/sport/football/m001", "not a url"],
+  });
+
+  assert.deepEqual(proposal, {
+    status: "FINISHED",
+    homeScore: 2,
+    awayScore: 1,
+    summary: "Argentina mở tỉ số; Germany gỡ; Argentina thắng cuối trận",
+    sources: ["https://www.fifa.com/match-centre/m001", "https://www.bbc.com/sport/football/m001"],
+  });
+
+  const message = formatAdminResultProposal(match, proposal);
+
+  assert.match(message, /Đề xuất AI\/search/);
+  assert.match(message, /Trạng thái: đã kết thúc/);
+  assert.match(message, /Argentina 2-1 Germany/);
+  assert.match(message, /https:\/\/www\.fifa\.com\/match-centre\/m001/);
+  assert.match(message, /https:\/\/www\.bbc\.com\/sport\/football\/m001/);
+  assert.match(message, /\/result M001 2-1 Argentina mở tỉ số; Germany gỡ; Argentina thắng cuối trận/);
+  assert.match(message, /Admin verify link nguồn rồi confirm/);
 });
 
 test("derives stable Telegram update dedupe keys", () => {

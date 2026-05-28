@@ -522,7 +522,14 @@ function buildFallbackLockMessage(match, picks) {
 
 function promptResult(match) {
   updateMatch(match.matchId, { adminResultPromptedAt: new Date().toISOString() }, "scheduler", "PROMPT_RESULT");
-  sendToAdmins("🔎 Cần xác nhận kết quả " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Dùng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".");
+  var text;
+  try {
+    text = formatAdminResultProposal(match, generateAiResultProposal(match));
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    text = "🔎 Cần xác nhận kết quả " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Dùng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".";
+  }
+  sendToAdmins(text);
 }
 
 function adminSetResult(chatId, actor, args) {

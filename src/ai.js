@@ -69,6 +69,11 @@ function generateAiMatchRecap(match, score, scoreChanges, leaderboard) {
   );
 }
 
+function generateAiResultProposal(match) {
+  var text = generateAiText(buildAiResultProposalPrompt(match), { webSearch: true });
+  return normalizeAiResultProposal(JSON.parse(text));
+}
+
 function generateAiDryRunMatches(baseTimeUtc) {
   var text = generateAiText(buildDryRunPrompt(baseTimeUtc), { webSearch: false });
   var parsed = JSON.parse(text);

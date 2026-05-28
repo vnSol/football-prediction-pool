@@ -8,7 +8,8 @@ Google Apps Script + Telegram Bot automation for an internal World Cup predictio
 - Lets players change picks through Telegram until kickoff.
 - Sends T-30m reminders to players who have not picked.
 - Locks at kickoff and defaults missing picks to the favorite side.
-- Lets admins confirm final scores from Google Search/public sources.
+- At T+120m, uses AI/web search to propose score, match status, and public source links for admin verification.
+- Lets admins confirm final scores after checking the source links.
 - Settles points, updates Google Sheets, and sends a cheerful recap + leaderboard.
 - Locks Sheets so players cannot overwrite data directly.
 
@@ -116,9 +117,10 @@ Manual commands are fallback controls. Normal flow is handled by `runScheduler()
 
 ## AI Messages
 
-The bot uses OpenAI for two automated messages:
+The bot uses OpenAI for three automated messages:
 
 - After lock: a suspenseful betting summary based only on Sheet facts.
+- At T+120m after kickoff: an admin-only result proposal using web search over 1-2 public sources. The message includes match status, proposed score if available, source links, and a suggested `/result` command. Admin must verify the links and confirm manually.
 - After settle: a localized match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.
 
 If OpenAI is not configured or the API call fails, the bot falls back to deterministic template messages so operations continue.
