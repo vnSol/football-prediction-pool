@@ -104,6 +104,7 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 - `/set_match_time <matchId> <kickoffUtc>`
 - `/reset_sheet`
 - `/dryrun [baseTimeUtc]`
+- `/dryrun_finish`
 - `/set_odds <matchId> <HOME|AWAY> <handicap>`
 - `/open <matchId>`
 - `/lock <matchId>`
@@ -134,6 +135,7 @@ Examples:
 /set_match_time T001 2026-06-12T20:00:00.000Z
 /dryrun
 /dryrun 2026-06-12T00:00:00.000Z
+/dryrun_finish
 ```
 
 Use `_` for spaces in team names when needed; the bot stores `_` as spaces.
@@ -156,7 +158,9 @@ Syntax:
 
 If omitted, the bot uses the current time when the command runs. The generated matches are scheduled relative to `baseTimeUtc`, with enough cases to test orchestration: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one scheduled match without odds to trigger the missing-odds alert.
 
-`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases, inserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. If the AI call fails, the bot uses a deterministic fallback set. It does not clear existing data; existing `matchId`s are skipped, so use `/reset_sheet` first when you want a clean test run.
+`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, inserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. If the AI call fails, the bot uses a deterministic fallback set. It does not clear existing data; existing `matchId`s are skipped, so use `/reset_sheet` first when you want a clean test run.
+
+Use `/dryrun_finish` to finish all unsettled `DRY-` matches immediately. The bot locks any dry-run match with odds, asks AI for synthetic final scores and match events, writes the result, and settles the matches. If the AI result call fails, it uses a deterministic fallback result for that match.
 
 ## Telegram Spam / Retry Recovery
 

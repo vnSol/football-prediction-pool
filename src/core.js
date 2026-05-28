@@ -221,6 +221,7 @@ function formatCommands(isAdmin) {
       "/recap <matchId> - Gửi lại recap",
       "/reset_sheet - Reset dữ liệu sheet",
       "/dryrun [baseTimeUtc ISO UTC] - Tạo dữ liệu mô phỏng",
+      "/dryrun_finish - AI nhập kết quả và settle các trận mô phỏng",
     ]);
   }
 
@@ -316,7 +317,7 @@ function buildAiRecapPrompt(input) {
     "Tập trung vào tóm tắt diễn biến chính và bình luận ngắn gọn, vui vẻ.",
     "Không đề xuất hành động tiếp theo. Không nhắc lại luật chơi. Không giải thích cách tính điểm.",
     "Đúng 3 dòng Telegram, không thêm tiêu đề, không thêm bullet.",
-    "Dòng 1: bình luận vui vẻ về trận đấu, có thể nhắc tỉ số hoặc diễn biến chính.",
+    "Dòng 1: bình luận vui vẻ về trận đấu, có thể nhắc tỉ số và diễn biến chính.",
     "Dòng 2: bình luận vui vẻ về bảng xếp hạng sau trận, dựa trên leaderboard và điểm betting; ví dụ: A vượt qua B trong cuộc đua về vị trí chót bảng, X một mình lạnh lẽo trên đỉnh khi cách nhóm sau N điểm, Y có vẻ đang chấp phần còn lại một đoạn trước khi quyết định tăng tốc.",
     "Dòng 3: dẫn nguồn được dùng để tổng hợp; nếu có nguồn thì chỉ liệt kê URL, nếu không có nguồn thì ghi: Nguồn: chưa có link public đủ rõ.",
     "",
@@ -490,7 +491,7 @@ function normalizeDryRunMatchesForOrchestration(matches, baseTimeUtc) {
     var scenario = cases[index] || cases[cases.length - 1];
     var favoriteSide = scenario[1];
     return {
-      matchId: String(match.matchId || "DRY-" + (index + 1)),
+      matchId: normalizeDryRunMatchId(match.matchId, index),
       homeTeam: String(match.homeTeam || "Home " + (index + 1)),
       awayTeam: String(match.awayTeam || "Away " + (index + 1)),
       kickoffUtc: new Date(base.getTime() + scenario[3] * 60000).toISOString(),
@@ -503,15 +504,102 @@ function normalizeDryRunMatchesForOrchestration(matches, baseTimeUtc) {
   });
 }
 
+function normalizeDryRunMatchId(matchId, index) {
+  var raw = String(matchId || index + 1)
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!raw) raw = String(index + 1);
+  return raw.indexOf("DRY-") === 0 ? raw : "DRY-" + raw;
+}
+
 function buildDryRunPrompt(baseTimeUtc) {
   return [
     "Create synthetic World Cup prediction-pool test data as JSON only.",
     "Return exactly 5 matches covering: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one missing-odds scheduled match.",
     "Use kickoffUtc values after this UTC base time: " + toDate(baseTimeUtc).toISOString(),
     "Fields per item: matchId, homeTeam, awayTeam, kickoffUtc, stage, status, favoriteSide, handicapSide, handicapGoals.",
+    "Every matchId must start with DRY-.",
     "stage must be GROUP or KNOCKOUT. status must be SCHEDULED. favoriteSide/handicapSide must be HOME or AWAY, except missing-odds match uses empty strings and empty handicapGoals.",
     "Use realistic but clearly synthetic teams. Do not include Markdown.",
   ].join("\n");
+}
+
+function isDryRunMatch(match) {
+  return String((match && match.matchId) || "").toUpperCase().indexOf("DRY-") === 0;
+}
+
+function getDryRunMatchesToFinish(matches) {
+  return (matches || []).filter(function (match) {
+    return isDryRunMatch(match) && match.status !== STATUSES.SETTLED && match.status !== STATUSES.CANCELLED;
+  });
+}
+
+function getDryRunFinishTime(matches) {
+  var latestKickoff = getDryRunMatchesToFinish(matches).reduce(function (latest, match) {
+    var time = toDate(match.kickoffUtc).getTime();
+    return Number.isNaN(time) ? latest : Math.max(latest, time);
+  }, 0);
+  return new Date(latestKickoff + 120 * 60000);
+}
+
+function buildDryRunResultPrompt(match) {
+  return [
+    "Create a synthetic final result for this dry-run World Cup prediction-pool match as JSON only.",
+    "JSON only. No Markdown.",
+    "Fields: homeScore, awayScore, events.",
+    "homeScore and awayScore must be integers from 0 to 6.",
+    "events must be an array of 3-5 short Vietnamese match events.",
+    "Match ID: " + match.matchId,
+    "Home: " + match.homeTeam,
+    "Away: " + match.awayTeam,
+    "Stage: " + match.stage,
+    "Handicap: " + formatHandicap(match),
+  ].join("\n");
+}
+
+function normalizeDryRunResult(result) {
+  var homeScore = Number(result && result.homeScore);
+  var awayScore = Number(result && result.awayScore);
+  if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore) || homeScore < 0 || awayScore < 0 || homeScore > 6 || awayScore > 6) {
+    throw new Error("AI dry-run result invalid score");
+  }
+
+  var events = Array.isArray(result.events)
+    ? result.events
+    : String((result && (result.summary || result.events)) || "").split(";");
+  var summary = events
+    .map(function (event) {
+      return String(event || "").trim();
+    })
+    .filter(Boolean)
+    .join("; ");
+  if (!summary) throw new Error("AI dry-run result missing events");
+
+  return {
+    homeScore: homeScore,
+    awayScore: awayScore,
+    summary: summary,
+  };
+}
+
+function buildFallbackDryRunResult(match) {
+  var homeScore = match.favoriteSide === SELECTIONS.AWAY ? 1 : 2;
+  var awayScore = match.favoriteSide === SELECTIONS.AWAY ? 2 : 1;
+  if (!match.favoriteSide) {
+    homeScore = 1;
+    awayScore = 1;
+  }
+  return {
+    homeScore: homeScore,
+    awayScore: awayScore,
+    summary: [
+      match.homeTeam + " nhập cuộc chủ động",
+      match.awayTeam + " đáp trả bằng vài pha phản công",
+      "Trận đấu mô phỏng khép lại với tỉ số " + homeScore + "-" + awayScore,
+    ].join("; "),
+  };
 }
 
 function shouldShowDrawOption(match) {
@@ -627,7 +715,10 @@ if (typeof module !== "undefined") {
     createDefaultPicks: createDefaultPicks,
     buildDryRunMatches: buildDryRunMatches,
     buildDryRunPrompt: buildDryRunPrompt,
+    buildDryRunResultPrompt: buildDryRunResultPrompt,
+    buildFallbackDryRunResult: buildFallbackDryRunResult,
     normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
+    normalizeDryRunResult: normalizeDryRunResult,
     formatHandicap: formatHandicap,
     formatCommands: formatCommands,
     formatKickoffTime: formatKickoffTime,
@@ -636,6 +727,8 @@ if (typeof module !== "undefined") {
     formatOpenMatchMessage: formatOpenMatchMessage,
     formatRecap: formatRecap,
     formatTimeUntilKickoff: formatTimeUntilKickoff,
+    getDryRunFinishTime: getDryRunFinishTime,
+    getDryRunMatchesToFinish: getDryRunMatchesToFinish,
     getHandicapOutcome: getHandicapOutcome,
     getSchedulerActions: getSchedulerActions,
     getTelegramUpdateDedupeKey: getTelegramUpdateDedupeKey,

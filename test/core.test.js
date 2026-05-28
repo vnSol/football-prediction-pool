@@ -25,9 +25,13 @@ const {
   buildResetSheetKeyboard,
   buildResetSheetConfirmKeyboard,
   buildDryRunMatches,
+  buildDryRunResultPrompt,
   normalizeDryRunMatchesForOrchestration,
+  normalizeDryRunResult,
   parseCallbackData,
   parseTelegramCommand,
+  getDryRunFinishTime,
+  getDryRunMatchesToFinish,
   scorePick,
   shouldAutoOpenAfterOdds,
 } = require("../src/core");
@@ -260,6 +264,7 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/matches/);
   assert.match(adminCommands, /\/set_odds/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
+  assert.match(adminCommands, /\/dryrun_finish/);
 });
 
 test("formats all picks in the next six hours for a player", () => {
@@ -438,13 +443,56 @@ test("normalizes AI dry-run matches into orchestration-ready cases", () => {
   assert.deepEqual(
     normalized.map((match) => [match.matchId, match.stage, match.status, match.favoriteSide, match.handicapGoals, match.kickoffUtc]),
     [
-      ["AI1", "GROUP", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5, "2026-06-12T05:30:00.000Z"],
-      ["AI2", "GROUP", STATUSES.SCHEDULED, SELECTIONS.AWAY, 1, "2026-06-12T05:45:00.000Z"],
-      ["AI3", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5, "2026-06-12T05:50:00.000Z"],
-      ["AI4", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.AWAY, 0, "2026-06-12T05:55:00.000Z"],
-      ["AI5", "GROUP", STATUSES.SCHEDULED, "", "", "2026-06-12T05:40:00.000Z"],
+      ["DRY-AI1", "GROUP", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5, "2026-06-12T05:30:00.000Z"],
+      ["DRY-AI2", "GROUP", STATUSES.SCHEDULED, SELECTIONS.AWAY, 1, "2026-06-12T05:45:00.000Z"],
+      ["DRY-AI3", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.HOME, 0.5, "2026-06-12T05:50:00.000Z"],
+      ["DRY-AI4", "KNOCKOUT", STATUSES.SCHEDULED, SELECTIONS.AWAY, 0, "2026-06-12T05:55:00.000Z"],
+      ["DRY-AI5", "GROUP", STATUSES.SCHEDULED, "", "", "2026-06-12T05:40:00.000Z"],
     ]
   );
+});
+
+test("selects unfinished dry-run matches and computes finish time", () => {
+  const matches = [
+    { matchId: "DRY-A", status: STATUSES.OPEN, kickoffUtc: "2026-06-12T05:30:00.000Z" },
+    { matchId: "DRY-B", status: STATUSES.LOCKED, kickoffUtc: "2026-06-12T05:55:00.000Z" },
+    { matchId: "DRY-C", status: STATUSES.SETTLED, kickoffUtc: "2026-06-12T06:00:00.000Z" },
+    { matchId: "REAL-1", status: STATUSES.OPEN, kickoffUtc: "2026-06-12T07:00:00.000Z" },
+  ];
+
+  assert.deepEqual(
+    getDryRunMatchesToFinish(matches).map((match) => match.matchId),
+    ["DRY-A", "DRY-B"]
+  );
+  assert.equal(getDryRunFinishTime(getDryRunMatchesToFinish(matches)).toISOString(), "2026-06-12T07:55:00.000Z");
+});
+
+test("builds and normalizes AI dry-run result payloads", () => {
+  const match = {
+    matchId: "DRY-A",
+    homeTeam: "Argentina",
+    awayTeam: "Germany",
+    stage: "GROUP",
+    handicapSide: SELECTIONS.HOME,
+    handicapGoals: -0.5,
+  };
+
+  assert.match(buildDryRunResultPrompt(match), /JSON only/);
+  assert.match(buildDryRunResultPrompt(match), /DRY-A/);
+
+  assert.deepEqual(
+    normalizeDryRunResult({
+      homeScore: "2",
+      awayScore: 1,
+      events: ["Argentina mở tỉ số", "Germany gỡ lại", "Argentina thắng cuối trận"],
+    }),
+    {
+      homeScore: 2,
+      awayScore: 1,
+      summary: "Argentina mở tỉ số; Germany gỡ lại; Argentina thắng cuối trận",
+    }
+  );
+  assert.throws(() => normalizeDryRunResult({ homeScore: "x", awayScore: 1, summary: "bad" }), /invalid score/);
 });
 
 test("omits draw button when handicap is not a whole number", () => {

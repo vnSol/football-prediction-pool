@@ -79,6 +79,11 @@ function generateAiDryRunMatches(baseTimeUtc) {
   return normalizeDryRunMatchesForOrchestration(matches.map(normalizeDryRunMatch), baseTimeUtc);
 }
 
+function generateAiDryRunResult(match) {
+  var text = generateAiText(buildDryRunResultPrompt(match), { webSearch: false });
+  return normalizeDryRunResult(JSON.parse(text));
+}
+
 function normalizeDryRunMatch(match) {
   var stage = String(match.stage || "").toUpperCase();
   var status = String(match.status || STATUSES.SCHEDULED).toUpperCase();

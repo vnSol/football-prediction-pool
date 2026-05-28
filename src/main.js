@@ -110,6 +110,7 @@ function handleMessage(message) {
   if (command.name === "set_match_time") return adminSetMatchTime(chatId, message.from.id, command.args);
   if (command.name === "reset_sheet") return adminResetSheet(chatId);
   if (command.name === "dryrun") return adminDryRun(chatId, message.from.id, command.args);
+  if (command.name === "dryrun_finish") return adminDryRunFinish(chatId, message.from.id);
   if (command.name === "open") return openMatch(command.args[0], message.from.id, chatId);
   if (command.name === "lock") return lockMatch(command.args[0], message.from.id, chatId);
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
@@ -283,6 +284,73 @@ function adminDryRun(chatId, actor, args) {
       "Created: " + (result.created.length ? result.created.join(", ") : "none"),
       "Skipped existing: " + (result.skipped.length ? result.skipped.join(", ") : "none"),
       "Đã chạy scheduler một lượt; dùng /matches để xem các trận đã mở pick.",
+    ].join("\n")
+  );
+}
+
+function adminDryRunFinish(chatId, actor) {
+  var matches = getDryRunMatchesToFinish(getMatches());
+  if (matches.length === 0) {
+    sendTelegramMessage(chatId, "Không có trận dry-run nào cần finish.");
+    return;
+  }
+
+  var finishAt = getDryRunFinishTime(matches);
+  matches.forEach(function (match) {
+    if (match.status !== STATUSES.LOCKED && hasLockedOdds(match)) {
+      lockMatch(match.matchId, actor);
+    }
+  });
+
+  var aiResults = 0;
+  var fallbackResults = 0;
+  var settled = [];
+  var failed = [];
+
+  getDryRunMatchesToFinish(getMatches()).forEach(function (match) {
+    try {
+      if (match.finalHomeScore === "" || match.finalHomeScore == null || match.finalAwayScore === "" || match.finalAwayScore == null) {
+        var result;
+        try {
+          result = generateAiDryRunResult(match);
+          aiResults += 1;
+        } catch (error) {
+          console.error(error && error.stack ? error.stack : error);
+          result = buildFallbackDryRunResult(match);
+          fallbackResults += 1;
+        }
+        updateMatch(
+          match.matchId,
+          {
+            finalHomeScore: result.homeScore,
+            finalAwayScore: result.awayScore,
+            finalSummary: result.summary,
+          },
+          actor,
+          "DRYRUN_SET_RESULT"
+        );
+      }
+
+      settleMatch(match.matchId, actor);
+      var after = getMatchById(match.matchId);
+      if (after && after.status === STATUSES.SETTLED) {
+        settled.push(match.matchId);
+      } else {
+        failed.push(match.matchId);
+      }
+    } catch (error) {
+      console.error(error && error.stack ? error.stack : error);
+      failed.push(match.matchId);
+    }
+  });
+
+  sendTelegramMessage(
+    chatId,
+    [
+      "Đã finish dry-run tại mốc " + finishAt.toISOString() + ".",
+      "AI results: " + aiResults + " | fallback: " + fallbackResults,
+      "Settled: " + (settled.length ? settled.join(", ") : "none"),
+      "Failed: " + (failed.length ? failed.join(", ") : "none"),
     ].join("\n")
   );
 }
