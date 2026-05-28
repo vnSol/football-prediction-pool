@@ -57,6 +57,12 @@ function canChangePick(match, now) {
   return toDate(now).getTime() < toDate(match.kickoffUtc).getTime();
 }
 
+function shouldAutoOpenAfterOdds(match, now) {
+  if (!match || match.status !== STATUSES.SCHEDULED || !hasLockedOdds(match)) return false;
+  var minutes = minutesUntil(match, now);
+  return minutes > 0 && minutes <= 360;
+}
+
 function getHandicapOutcome(match, score) {
   var homeAdjusted = Number(score.homeScore);
   var awayAdjusted = Number(score.awayScore);
@@ -586,6 +592,7 @@ if (typeof module !== "undefined") {
     parseBoolean: parseBoolean,
     parseTelegramCommand: parseTelegramCommand,
     scorePick: scorePick,
+    shouldAutoOpenAfterOdds: shouldAutoOpenAfterOdds,
     shouldShowDrawOption: shouldShowDrawOption,
     sideName: sideName,
     sortLeaderboard: sortLeaderboard,

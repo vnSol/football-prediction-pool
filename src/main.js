@@ -341,11 +341,12 @@ function adminSetOdds(chatId, actor, args) {
   var favoriteSide = String(args[1] || "").toUpperCase();
   var handicapGoals = Number(args[2]);
   var match = getMatchById(matchId);
+  var now = new Date();
   if (!match || !isValidSelection(favoriteSide) || !isFinite(handicapGoals)) {
     sendTelegramMessage(chatId, "Cú pháp: /set_odds <matchId> <HOME|AWAY> <-0.5>");
     return;
   }
-  if (toDate(match.kickoffUtc).getTime() <= Date.now()) {
+  if (toDate(match.kickoffUtc).getTime() <= now.getTime()) {
     sendTelegramMessage(chatId, "Trận đã bắt đầu, không sửa kèo.");
     return;
   }
@@ -355,12 +356,18 @@ function adminSetOdds(chatId, actor, args) {
       favoriteSide: favoriteSide,
       handicapSide: favoriteSide,
       handicapGoals: handicapGoals,
-      oddsLockedAt: new Date().toISOString(),
+      oddsLockedAt: now.toISOString(),
     },
     actor,
     "SET_ODDS"
   );
-  sendTelegramMessage(chatId, "Đã ghi kèo cho " + matchId + ": " + sideName(match, favoriteSide) + " " + handicapGoals);
+  var updatedMatch = getMatchById(matchId);
+  if (shouldAutoOpenAfterOdds(updatedMatch, now)) {
+    sendTelegramMessage(chatId, "Đã ghi kèo cho " + matchId + ": " + formatHandicap(updatedMatch) + ". Trận trong T-6h nên bot mở pick ngay.");
+    openMatch(matchId, actor, chatId);
+    return;
+  }
+  sendTelegramMessage(chatId, "Đã ghi kèo cho " + matchId + ": " + formatHandicap(updatedMatch));
 }
 
 function openMatch(matchId, actor, replyChatId) {

@@ -90,7 +90,7 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 ## Player Commands
 
 - `/matches`: show open matches.
-- `/mypick`: show all picks, including missing picks, for matches that have not started.
+- `/mypick`: show picks, including missing picks, for matches in the next 6 hours.
 - `/mypick <matchId>`: show current pick for one match.
 - `/leaderboard`: show leaderboard.
 - Inline buttons: choose home/draw/away and toggle star for knockout matches.
@@ -103,14 +103,14 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 - `/set_match_time <matchId> <kickoffUtc>`
 - `/reset_sheet`
 - `/dryrun [baseTimeUtc]`
-- `/set_odds <matchId> <HOME|AWAY> <-0.5>`
+- `/set_odds <matchId> <HOME|AWAY> <handicap>`
 - `/open <matchId>`
 - `/lock <matchId>`
 - `/result <matchId> <home-away> <event 1; event 2; event 3>`
 - `/settle <matchId>`
 - `/recap <matchId>`
 
-Manual commands are fallback controls. Normal flow is handled by `runScheduler()`.
+Manual commands are fallback controls. Normal flow is handled by `runScheduler()`. If `/set_odds` is used for a scheduled match inside T-6h, the bot opens pick immediately.
 
 ## AI Messages
 

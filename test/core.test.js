@@ -27,6 +27,7 @@ const {
   parseCallbackData,
   parseTelegramCommand,
   scorePick,
+  shouldAutoOpenAfterOdds,
 } = require("../src/core");
 
 function date(value) {
@@ -171,6 +172,38 @@ test("scheduler opens, alerts, reminds, locks, and prompts for result", () => {
       [ACTIONS.LOCK_MATCH, "LOCK-ME"],
       [ACTIONS.PROMPT_RESULT, "RESULT-ME"],
     ]
+  );
+});
+
+test("auto-opens a scheduled match after odds are set inside the T-6h window", () => {
+  const now = date("2026-06-12T13:00:00.000Z");
+
+  assert.equal(
+    shouldAutoOpenAfterOdds(
+      {
+        matchId: "G1003",
+        status: STATUSES.SCHEDULED,
+        kickoffUtc: "2026-06-12T18:30:00.000Z",
+        favoriteSide: SELECTIONS.HOME,
+        handicapGoals: 0.5,
+      },
+      now
+    ),
+    true
+  );
+
+  assert.equal(
+    shouldAutoOpenAfterOdds(
+      {
+        matchId: "FUTURE",
+        status: STATUSES.SCHEDULED,
+        kickoffUtc: "2026-06-12T19:30:01.000Z",
+        favoriteSide: SELECTIONS.HOME,
+        handicapGoals: 0.5,
+      },
+      now
+    ),
+    false
   );
 });
 
