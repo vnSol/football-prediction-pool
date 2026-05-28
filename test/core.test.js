@@ -548,6 +548,16 @@ test("builds AI prompts with facts-first constraints", () => {
 
   assert.match(recapPrompt, /tối đa 2 nguồn public/);
   assert.match(recapPrompt, /tiếng Việt/);
+  assert.match(recapPrompt, /Không đề xuất/);
+  assert.match(recapPrompt, /Không nhắc lại luật chơi/);
+  assert.match(recapPrompt, /chỉ liệt kê URL/);
+  assert.match(recapPrompt, /Đúng 3 dòng/);
+  assert.match(recapPrompt, /Dòng 1/);
+  assert.match(recapPrompt, /Dòng 2/);
+  assert.match(recapPrompt, /Dòng 3/);
+  assert.match(recapPrompt, /vị trí chót bảng/);
+  assert.match(recapPrompt, /lạnh lẽo trên đỉnh/);
+  assert.match(recapPrompt, /tăng tốc/);
   assert.match(recapPrompt, /An \+1/);
 });
 
