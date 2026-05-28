@@ -166,6 +166,26 @@ function appendMatches(matches, actor) {
   return { created: created, skipped: skipped };
 }
 
+function upsertDryRunMatches(matches, actor) {
+  var created = [];
+  var refreshed = [];
+  var skipped = [];
+  matches.forEach(function (match) {
+    var result = addMatch(match, actor);
+    if (result.ok) {
+      created.push(match.matchId);
+      return;
+    }
+    if (isDryRunMatch(result.match)) {
+      updateMatch(match.matchId, buildDryRunMatchRefreshPatch(match), actor, "REFRESH_DRYRUN_MATCH");
+      refreshed.push(match.matchId);
+      return;
+    }
+    skipped.push(match.matchId);
+  });
+  return { created: created, refreshed: refreshed, skipped: skipped };
+}
+
 function updateObject(sheetName, matcher, patch) {
   var sheet = ensureSheet(sheetName);
   var headers = SHEET_HEADERS[sheetName];

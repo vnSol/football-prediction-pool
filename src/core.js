@@ -38,10 +38,163 @@ function isValidSelection(selection) {
   return selection === SELECTIONS.HOME || selection === SELECTIONS.DRAW || selection === SELECTIONS.AWAY;
 }
 
+var TEAM_FLAG_CODES = Object.freeze({
+  algeria: "DZ",
+  angola: "AO",
+  argentina: "AR",
+  australia: "AU",
+  austria: "AT",
+  bahrain: "BH",
+  belgium: "BE",
+  benin: "BJ",
+  bolivia: "BO",
+  brazil: "BR",
+  "burkina faso": "BF",
+  cameroon: "CM",
+  canada: "CA",
+  "cape verde": "CV",
+  chile: "CL",
+  china: "CN",
+  colombia: "CO",
+  "costa rica": "CR",
+  "cote d ivoire": "CI",
+  croatia: "HR",
+  curacao: "CW",
+  "czech republic": "CZ",
+  czechia: "CZ",
+  denmark: "DK",
+  "dominican republic": "DO",
+  "dr congo": "CD",
+  ecuador: "EC",
+  egypt: "EG",
+  "el salvador": "SV",
+  england: "GB-ENG",
+  france: "FR",
+  gabon: "GA",
+  germany: "DE",
+  ghana: "GH",
+  greece: "GR",
+  guatemala: "GT",
+  guinea: "GN",
+  haiti: "HT",
+  honduras: "HN",
+  hungary: "HU",
+  indonesia: "ID",
+  iran: "IR",
+  iraq: "IQ",
+  italy: "IT",
+  "ivory coast": "CI",
+  jamaica: "JM",
+  japan: "JP",
+  jordan: "JO",
+  "korea republic": "KR",
+  malaysia: "MY",
+  mali: "ML",
+  mexico: "MX",
+  morocco: "MA",
+  namibia: "NA",
+  netherlands: "NL",
+  "new zealand": "NZ",
+  nigeria: "NG",
+  "north korea": "KP",
+  "northern ireland": "GB",
+  norway: "NO",
+  oman: "OM",
+  palestine: "PS",
+  panama: "PA",
+  paraguay: "PY",
+  peru: "PE",
+  poland: "PL",
+  portugal: "PT",
+  qatar: "QA",
+  "republic of korea": "KR",
+  romania: "RO",
+  "saudi arabia": "SA",
+  scotland: "GB-SCT",
+  senegal: "SN",
+  serbia: "RS",
+  slovakia: "SK",
+  slovenia: "SI",
+  "south africa": "ZA",
+  "south korea": "KR",
+  spain: "ES",
+  suriname: "SR",
+  sweden: "SE",
+  switzerland: "CH",
+  syria: "SY",
+  thailand: "TH",
+  "trinidad and tobago": "TT",
+  tunisia: "TN",
+  turkey: "TR",
+  turkiye: "TR",
+  ukraine: "UA",
+  "united arab emirates": "AE",
+  "united states": "US",
+  "united states of america": "US",
+  uruguay: "UY",
+  us: "US",
+  usa: "US",
+  uzbekistan: "UZ",
+  venezuela: "VE",
+  vietnam: "VN",
+  wales: "GB-WLS",
+  zambia: "ZM",
+  zimbabwe: "ZW",
+});
+
 function sideName(match, side) {
   if (side === SELECTIONS.HOME) return match.homeTeam || "Đội nhà";
   if (side === SELECTIONS.AWAY) return match.awayTeam || "Đội khách";
   return "Hòa";
+}
+
+function normalizeTeamFlagKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function subdivisionFlagEmoji(tag) {
+  var codePoints = [0x1f3f4];
+  String(tag || "").split("").forEach(function (char) {
+    codePoints.push(0xe0000 + char.charCodeAt(0));
+  });
+  codePoints.push(0xe007f);
+  return String.fromCodePoint.apply(String, codePoints);
+}
+
+function flagEmojiFromCode(code) {
+  var normalized = String(code || "").toUpperCase();
+  if (normalized === "GB-ENG") return subdivisionFlagEmoji("gbeng");
+  if (normalized === "GB-SCT") return subdivisionFlagEmoji("gbsct");
+  if (normalized === "GB-WLS") return subdivisionFlagEmoji("gbwls");
+  if (!/^[A-Z]{2}$/.test(normalized)) return "";
+  return normalized
+    .split("")
+    .map(function (char) {
+      return String.fromCodePoint(0x1f1e6 + char.charCodeAt(0) - 65);
+    })
+    .join("");
+}
+
+function teamFlagEmoji(teamName) {
+  return flagEmojiFromCode(TEAM_FLAG_CODES[normalizeTeamFlagKey(teamName)]);
+}
+
+function teamDisplayName(teamName) {
+  var name = String(teamName || "").trim();
+  var flag = teamFlagEmoji(name);
+  return flag ? flag + " " + name : name;
+}
+
+function sideDisplayName(match, side) {
+  if (side === SELECTIONS.DRAW) return "Hòa";
+  return teamDisplayName(sideName(match, side));
 }
 
 function isKnockout(match) {
@@ -49,7 +202,70 @@ function isKnockout(match) {
 }
 
 function hasLockedOdds(match) {
-  return isValidSelection(match.favoriteSide) && isFinite(Number(match.handicapGoals));
+  return (
+    match &&
+    isValidSelection(match.favoriteSide) &&
+    match.handicapGoals !== "" &&
+    match.handicapGoals != null &&
+    isFinite(Number(match.handicapGoals))
+  );
+}
+
+function buildDefaultOddsPatch(now) {
+  return {
+    favoriteSide: SELECTIONS.HOME,
+    handicapSide: SELECTIONS.HOME,
+    handicapGoals: 0,
+    oddsLockedAt: toIso(now || new Date()),
+  };
+}
+
+function buildDryRunMatchRefreshPatch(match) {
+  return {
+    homeTeam: match.homeTeam,
+    awayTeam: match.awayTeam,
+    kickoffUtc: match.kickoffUtc,
+    stage: match.stage,
+    status: match.status,
+    favoriteSide: match.favoriteSide,
+    handicapSide: match.handicapSide,
+    handicapGoals: match.handicapGoals,
+    oddsLockedAt: "",
+    oddsAlertedAt: "",
+    openedAt: "",
+    reminded30At: "",
+    lockedAt: "",
+    adminResultPromptedAt: "",
+    finalHomeScore: "",
+    finalAwayScore: "",
+    finalSummary: "",
+    handicapOutcome: "",
+    settledAt: "",
+  };
+}
+
+function getDefaultPickSelection(match) {
+  return isValidSelection(match && match.favoriteSide) ? match.favoriteSide : SELECTIONS.HOME;
+}
+
+function canSetOdds(match, now) {
+  if (!match) return false;
+  if (match.status !== STATUSES.SCHEDULED && match.status !== STATUSES.OPEN) return false;
+  return toDate(match.kickoffUtc).getTime() > toDate(now || new Date()).getTime();
+}
+
+function oddsValuesChanged(match, favoriteSide, handicapGoals) {
+  var nextSide = String(favoriteSide || "").toUpperCase();
+  var currentHandicapSide = String(match.handicapSide || match.favoriteSide || "").toUpperCase();
+  return (
+    String(match.favoriteSide || "").toUpperCase() !== nextSide ||
+    currentHandicapSide !== nextSide ||
+    Number(match.handicapGoals) !== Number(handicapGoals)
+  );
+}
+
+function shouldNotifyOddsUpdate(match, favoriteSide, handicapGoals) {
+  return Boolean(match && match.status === STATUSES.OPEN && (!hasLockedOdds(match) || oddsValuesChanged(match, favoriteSide, handicapGoals)));
 }
 
 function canChangePick(match, now) {
@@ -107,7 +323,7 @@ function createDefaultPicks(match, players, existingPicks, now) {
       return {
         matchId: match.matchId,
         telegramUserId: String(player.telegramUserId),
-        selection: match.favoriteSide,
+        selection: getDefaultPickSelection(match),
         star: false,
         source: SOURCE.AUTO_DEFAULT,
         createdAt: toIso(now),
@@ -135,7 +351,7 @@ function getSchedulerActions(matches, picks, now) {
 
     if (match.status === STATUSES.SCHEDULED && untilHours <= 6 && untilMinutes > 0) {
       actions.push({
-        type: hasLockedOdds(match) ? ACTIONS.OPEN_PICK : ACTIONS.ODDS_ALERT,
+        type: ACTIONS.OPEN_PICK,
         matchId: match.matchId,
       });
       return;
@@ -252,10 +468,10 @@ function formatMyUpcomingPicks(input) {
       .map(function (match) {
         var pick = picksByMatchId[String(match.matchId)];
         return [
-          match.matchId + ": " + sideName(match, SELECTIONS.HOME) + " vs " + sideName(match, SELECTIONS.AWAY),
+          match.matchId + ": " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
           "Giờ đá: " + formatKickoffTime(match.kickoffUtc),
           "Kèo: " + formatHandicap(match),
-          "Pick: " + (pick ? sideName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : "") : "Chưa pick"),
+          "Pick: " + (pick ? sideDisplayName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : "") : "Chưa pick"),
         ].join("\n");
       })
       .join("\n\n")
@@ -271,7 +487,7 @@ function buildLockedBettingFacts(input) {
   var picks = input.picks || [];
   return {
     matchId: match.matchId,
-    title: sideName(match, SELECTIONS.HOME) + " vs " + sideName(match, SELECTIONS.AWAY),
+    title: sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
     kickoff: formatKickoffTime(match.kickoffUtc),
     handicap: formatHandicap(match),
     totalPicks: picks.length,
@@ -322,9 +538,9 @@ function buildAiRecapPrompt(input) {
     "Dòng 3: dẫn nguồn được dùng để tổng hợp; nếu có nguồn thì chỉ liệt kê URL, nếu không có nguồn thì ghi: Nguồn: chưa có link public đủ rõ.",
     "",
     "Facts đã xác nhận:",
-    "- Trận: " + sideName(match, SELECTIONS.HOME) + " vs " + sideName(match, SELECTIONS.AWAY),
+    "- Trận: " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
     "- Giờ đá: " + formatKickoffTime(match.kickoffUtc),
-    "- Tỉ số final: " + sideName(match, SELECTIONS.HOME) + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + sideName(match, SELECTIONS.AWAY),
+    "- Tỉ số final: " + sideDisplayName(match, SELECTIONS.HOME) + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + sideDisplayName(match, SELECTIONS.AWAY),
     "- Kèo: " + formatHandicap(match),
     "",
     "Điểm betting:",
@@ -348,7 +564,7 @@ function formatHandicap(match) {
   var handicapSide = match.handicapSide || match.favoriteSide;
   var givingSide = handicap >= 0 ? handicapSide : oppositeSide(handicapSide);
   var receivingSide = oppositeSide(givingSide);
-  return sideName(match, givingSide) + " chấp " + sideName(match, receivingSide) + " " + Math.abs(handicap) + " Trái";
+  return sideDisplayName(match, givingSide) + " chấp " + sideDisplayName(match, receivingSide) + " " + Math.abs(handicap) + " Trái";
 }
 
 function oppositeSide(side) {
@@ -382,9 +598,9 @@ function formatRecap(input) {
 
   return [
     "🎉 Recap trận đấu",
-    match.homeTeam + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + match.awayTeam,
+    sideDisplayName(match, SELECTIONS.HOME) + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + sideDisplayName(match, SELECTIONS.AWAY),
     "Kèo: " + formatHandicap(match),
-    "Đội thắng kèo: " + sideName(match, outcome),
+    "Đội thắng kèo: " + sideDisplayName(match, outcome),
     "",
     "Diễn biến chính:",
     eventText,
@@ -427,14 +643,14 @@ function parseCallbackData(value) {
 
 function buildPickKeyboard(match) {
   var pickRow = [
-    { text: sideName(match, SELECTIONS.HOME), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.HOME },
+    { text: sideDisplayName(match, SELECTIONS.HOME), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.HOME },
   ];
 
   if (shouldShowDrawOption(match)) {
     pickRow.push({ text: "Hòa", callback_data: "pick|" + match.matchId + "|" + SELECTIONS.DRAW });
   }
 
-  pickRow.push({ text: sideName(match, SELECTIONS.AWAY), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.AWAY });
+  pickRow.push({ text: sideDisplayName(match, SELECTIONS.AWAY), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.AWAY });
 
   var keyboard = [pickRow];
 
@@ -516,13 +732,14 @@ function normalizeDryRunMatchId(matchId, index) {
 
 function buildDryRunPrompt(baseTimeUtc) {
   return [
-    "Create synthetic World Cup prediction-pool test data as JSON only.",
+    "Create World Cup prediction-pool dry-run test data as JSON only.",
     "Return exactly 5 matches covering: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one missing-odds scheduled match.",
     "Use kickoffUtc values after this UTC base time: " + toDate(baseTimeUtc).toISOString(),
     "Fields per item: matchId, homeTeam, awayTeam, kickoffUtc, stage, status, favoriteSide, handicapSide, handicapGoals.",
     "Every matchId must start with DRY-.",
     "stage must be GROUP or KNOCKOUT. status must be SCHEDULED. favoriteSide/handicapSide must be HOME or AWAY, except missing-odds match uses empty strings and empty handicapGoals.",
-    "Use realistic but clearly synthetic teams. Do not include Markdown.",
+    "Use only real national teams so Telegram flag display can be tested; good examples: Argentina, Germany, Brazil, Japan, France, Spain, Netherlands, Portugal, England, USA.",
+    "The schedule, odds, and matchups may be invented for dry-run coverage. Do not include Markdown.",
   ].join("\n");
 }
 
@@ -552,8 +769,8 @@ function buildDryRunResultPrompt(match) {
     "homeScore and awayScore must be integers from 0 to 6.",
     "events must be an array of 3-5 short Vietnamese match events.",
     "Match ID: " + match.matchId,
-    "Home: " + match.homeTeam,
-    "Away: " + match.awayTeam,
+    "Home: " + sideDisplayName(match, SELECTIONS.HOME),
+    "Away: " + sideDisplayName(match, SELECTIONS.AWAY),
     "Stage: " + match.stage,
     "Handicap: " + formatHandicap(match),
   ].join("\n");
@@ -595,8 +812,8 @@ function buildFallbackDryRunResult(match) {
     homeScore: homeScore,
     awayScore: awayScore,
     summary: [
-      match.homeTeam + " nhập cuộc chủ động",
-      match.awayTeam + " đáp trả bằng vài pha phản công",
+      sideDisplayName(match, SELECTIONS.HOME) + " nhập cuộc chủ động",
+      sideDisplayName(match, SELECTIONS.AWAY) + " đáp trả bằng vài pha phản công",
       "Trận đấu mô phỏng khép lại với tỉ số " + homeScore + "-" + awayScore,
     ].join("; "),
   };
@@ -639,7 +856,7 @@ function formatTimeUntilKickoff(value, now) {
 
 function formatOpenMatchMessage(match, now) {
   return [
-    match.matchId + ": " + match.homeTeam + " vs " + match.awayTeam,
+    match.matchId + ": " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
     "Kèo: " + formatHandicap(match),
     "Còn lại: " + formatTimeUntilKickoff(match.kickoffUtc, now || new Date()),
   ].join("\n");
@@ -707,13 +924,16 @@ if (typeof module !== "undefined") {
     SELECTIONS: SELECTIONS,
     SOURCE: SOURCE,
     STATUSES: STATUSES,
+    buildDefaultOddsPatch: buildDefaultOddsPatch,
     canChangePick: canChangePick,
+    canSetOdds: canSetOdds,
     buildPickKeyboard: buildPickKeyboard,
     buildAiRecapPrompt: buildAiRecapPrompt,
     buildLockDramaPrompt: buildLockDramaPrompt,
     buildLockedBettingFacts: buildLockedBettingFacts,
     createDefaultPicks: createDefaultPicks,
     buildDryRunMatches: buildDryRunMatches,
+    buildDryRunMatchRefreshPatch: buildDryRunMatchRefreshPatch,
     buildDryRunPrompt: buildDryRunPrompt,
     buildDryRunResultPrompt: buildDryRunResultPrompt,
     buildFallbackDryRunResult: buildFallbackDryRunResult,
@@ -744,8 +964,12 @@ if (typeof module !== "undefined") {
     parseTelegramCommand: parseTelegramCommand,
     scorePick: scorePick,
     shouldAutoOpenAfterOdds: shouldAutoOpenAfterOdds,
+    shouldNotifyOddsUpdate: shouldNotifyOddsUpdate,
     shouldShowDrawOption: shouldShowDrawOption,
+    sideDisplayName: sideDisplayName,
     sideName: sideName,
     sortLeaderboard: sortLeaderboard,
+    teamDisplayName: teamDisplayName,
+    teamFlagEmoji: teamFlagEmoji,
   };
 }

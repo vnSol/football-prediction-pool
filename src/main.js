@@ -155,10 +155,10 @@ function adminAddMatch(chatId, actor, args) {
   }
   var result = addMatch(match, actor);
   if (!result.ok) {
-    sendTelegramMessage(chatId, "Trận đã tồn tại: " + result.match.matchId + " " + result.match.homeTeam + " vs " + result.match.awayTeam + ".");
+    sendTelegramMessage(chatId, "Trận đã tồn tại: " + result.match.matchId + " " + sideDisplayName(result.match, SELECTIONS.HOME) + " vs " + sideDisplayName(result.match, SELECTIONS.AWAY) + ".");
     return;
   }
-  sendTelegramMessage(chatId, "Đã thêm trận " + match.matchId + ": " + match.homeTeam + " vs " + match.awayTeam + " lúc " + formatKickoffTime(match.kickoffUtc) + ".");
+  sendTelegramMessage(chatId, "Đã thêm trận " + match.matchId + ": " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " lúc " + formatKickoffTime(match.kickoffUtc) + ".");
 }
 
 function adminSetMatchTime(chatId, actor, args) {
@@ -207,8 +207,8 @@ function handleCallbackQuery(callbackQuery) {
   if (data.action === "pick" && isValidSelection(data.value)) {
     var previous = getPick(match.matchId, telegramUserId);
     var pick = upsertPick(match, player, data.value, previous ? previous.star : false, SOURCE.TELEGRAM, telegramUserId);
-    answerCallbackQuery(callbackQuery.id, "Đã chọn: " + sideName(match, pick.selection));
-    sendTelegramMessage(chatId, "✅ Pick hiện tại của bạn: " + sideName(match, pick.selection) + (pick.star ? " ⭐" : ""));
+    answerCallbackQuery(callbackQuery.id, "Đã chọn: " + sideDisplayName(match, pick.selection));
+    sendTelegramMessage(chatId, "✅ Pick hiện tại của bạn: " + sideDisplayName(match, pick.selection) + (pick.star ? " ⭐" : ""));
     return;
   }
 
@@ -224,7 +224,7 @@ function handleCallbackQuery(callbackQuery) {
     }
     var updated = upsertPick(match, player, existing.selection, !parseBoolean(existing.star), SOURCE.TELEGRAM, telegramUserId);
     answerCallbackQuery(callbackQuery.id, updated.star ? "Đã bật ngôi sao." : "Đã tắt ngôi sao.");
-    sendTelegramMessage(chatId, "✅ Pick hiện tại của bạn: " + sideName(match, updated.selection) + (updated.star ? " ⭐" : ""));
+    sendTelegramMessage(chatId, "✅ Pick hiện tại của bạn: " + sideDisplayName(match, updated.selection) + (updated.star ? " ⭐" : ""));
   }
 }
 
@@ -275,13 +275,14 @@ function adminDryRun(chatId, actor, args) {
     matches = buildDryRunMatches(baseTimeUtc);
     source = "fallback";
   }
-  var result = appendMatches(matches, actor);
+  var result = upsertDryRunMatches(matches, actor);
   processSchedulerActions(toDate(baseTimeUtc));
   sendTelegramMessage(
     chatId,
     [
       "Đã tạo dry-run data bằng " + source + ".",
       "Created: " + (result.created.length ? result.created.join(", ") : "none"),
+      "Refreshed existing: " + (result.refreshed.length ? result.refreshed.join(", ") : "none"),
       "Skipped existing: " + (result.skipped.length ? result.skipped.join(", ") : "none"),
       "Đã chạy scheduler một lượt; dùng /matches để xem các trận đã mở pick.",
     ].join("\n")
@@ -403,7 +404,7 @@ function sendMyPick(chatId, player, matchId) {
     sendTelegramMessage(chatId, "Bạn chưa pick trận " + targetMatchId + ".");
     return;
   }
-  sendTelegramMessage(chatId, "Pick của bạn: " + sideName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : ""));
+  sendTelegramMessage(chatId, "Pick của bạn: " + sideDisplayName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : ""));
 }
 
 function adminSetOdds(chatId, actor, args) {
@@ -416,10 +417,12 @@ function adminSetOdds(chatId, actor, args) {
     sendTelegramMessage(chatId, "Cú pháp: /set_odds <matchId> <HOME|AWAY> <-0.5>");
     return;
   }
-  if (toDate(match.kickoffUtc).getTime() <= now.getTime()) {
-    sendTelegramMessage(chatId, "Trận đã bắt đầu, không sửa kèo.");
+  if (!canSetOdds(match, now)) {
+    sendTelegramMessage(chatId, "Trận đã khóa bình chọn hoặc đã bắt đầu, không sửa kèo.");
     return;
   }
+  var previousHandicap = hasLockedOdds(match) ? formatHandicap(match) : "Chưa có kèo";
+  var shouldNotifyPlayers = shouldNotifyOddsUpdate(match, favoriteSide, handicapGoals);
   updateMatch(
     matchId,
     {
@@ -438,19 +441,25 @@ function adminSetOdds(chatId, actor, args) {
     return;
   }
   sendTelegramMessage(chatId, "Đã ghi kèo cho " + matchId + ": " + formatHandicap(updatedMatch));
+  if (shouldNotifyPlayers) sendOddsUpdateMessage(updatedMatch, previousHandicap);
 }
 
 function openMatch(matchId, actor, replyChatId) {
   var match = getMatchById(matchId);
-  if (!match || !hasLockedOdds(match)) {
-    if (replyChatId) sendTelegramMessage(replyChatId, "Không mở được: thiếu trận hoặc thiếu kèo.");
+  if (!match) {
+    if (replyChatId) sendTelegramMessage(replyChatId, "Không mở được: thiếu trận.");
     return;
   }
-  if (toDate(match.kickoffUtc).getTime() <= Date.now()) {
+  var now = new Date();
+  if (toDate(match.kickoffUtc).getTime() <= now.getTime()) {
     if (replyChatId) sendTelegramMessage(replyChatId, "Trận đã bắt đầu, không mở pick.");
     return;
   }
-  updateMatch(matchId, { status: STATUSES.OPEN, openedAt: new Date().toISOString() }, actor, "OPEN_MATCH");
+  if (!hasLockedOdds(match)) {
+    updateMatch(matchId, buildDefaultOddsPatch(now), actor, "DEFAULT_ODDS");
+    match = getMatchById(matchId);
+  }
+  updateMatch(matchId, { status: STATUSES.OPEN, openedAt: now.toISOString() }, actor, "OPEN_MATCH");
   sendPickOpenMessage(getMatchById(matchId));
   if (replyChatId) sendTelegramMessage(replyChatId, "Đã mở pick cho " + matchId + ".");
 }
@@ -458,7 +467,7 @@ function openMatch(matchId, actor, replyChatId) {
 function alertMissingOdds(match) {
   if (match.oddsAlertedAt) return;
   updateMatch(match.matchId, { oddsAlertedAt: new Date().toISOString() }, "scheduler", "ODDS_ALERT");
-  sendToAdmins("⚠️ Còn dưới 6h tới " + match.homeTeam + " vs " + match.awayTeam + " nhưng chưa có kèo. Dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.");
+  sendToAdmins("⚠️ Còn dưới 6h tới " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " nhưng chưa có kèo. Dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.");
 }
 
 function remindMissing(match) {
@@ -469,12 +478,17 @@ function remindMissing(match) {
 function lockMatch(matchId, actor, replyChatId) {
   var match = getMatchById(matchId);
   if (!match) return;
-  var defaults = createDefaultPicks(match, getActivePlayers(), getPicks(), new Date());
+  var now = new Date();
+  if (!hasLockedOdds(match)) {
+    updateMatch(matchId, buildDefaultOddsPatch(now), actor, "DEFAULT_ODDS");
+    match = getMatchById(matchId);
+  }
+  var defaults = createDefaultPicks(match, getActivePlayers(), getPicks(), now);
   defaults.forEach(function (pick) {
     var player = getPlayerByTelegramId(pick.telegramUserId);
     upsertPick(match, player, pick.selection, false, SOURCE.AUTO_DEFAULT, actor);
   });
-  updateMatch(matchId, { status: STATUSES.LOCKED, lockedAt: new Date().toISOString() }, actor, "LOCK_MATCH");
+  updateMatch(matchId, { status: STATUSES.LOCKED, lockedAt: now.toISOString() }, actor, "LOCK_MATCH");
   sendLockMessage(matchId);
   if (replyChatId) sendTelegramMessage(replyChatId, "Đã khóa trận " + matchId + ".");
 }
@@ -508,7 +522,7 @@ function buildFallbackLockMessage(match, picks) {
 
 function promptResult(match) {
   updateMatch(match.matchId, { adminResultPromptedAt: new Date().toISOString() }, "scheduler", "PROMPT_RESULT");
-  sendToAdmins("🔎 Cần xác nhận kết quả " + match.homeTeam + " vs " + match.awayTeam + ". Dùng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".");
+  sendToAdmins("🔎 Cần xác nhận kết quả " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Dùng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".");
 }
 
 function adminSetResult(chatId, actor, args) {

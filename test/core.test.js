@@ -5,7 +5,10 @@ const {
   ACTIONS,
   SELECTIONS,
   STATUSES,
+  buildDefaultOddsPatch,
+  buildDryRunMatchRefreshPatch,
   canChangePick,
+  canSetOdds,
   createDefaultPicks,
   buildPickKeyboard,
   formatKickoffTime,
@@ -25,6 +28,7 @@ const {
   buildResetSheetKeyboard,
   buildResetSheetConfirmKeyboard,
   buildDryRunMatches,
+  buildDryRunPrompt,
   buildDryRunResultPrompt,
   normalizeDryRunMatchesForOrchestration,
   normalizeDryRunResult,
@@ -34,6 +38,9 @@ const {
   getDryRunMatchesToFinish,
   scorePick,
   shouldAutoOpenAfterOdds,
+  shouldNotifyOddsUpdate,
+  teamDisplayName,
+  teamFlagEmoji,
 } = require("../src/core");
 
 function date(value) {
@@ -134,7 +141,7 @@ test("creates default picks for active players who missed kickoff", () => {
   ]);
 });
 
-test("scheduler opens, alerts, reminds, locks, and prompts for result", () => {
+test("scheduler opens picks with zero handicap when odds are missing", () => {
   const now = date("2026-06-12T13:00:00.000Z");
   const matches = [
     {
@@ -173,12 +180,85 @@ test("scheduler opens, alerts, reminds, locks, and prompts for result", () => {
     actions.map((action) => [action.type, action.matchId]),
     [
       [ACTIONS.OPEN_PICK, "OPEN-ME"],
-      [ACTIONS.ODDS_ALERT, "NEEDS-ODDS"],
+      [ACTIONS.OPEN_PICK, "NEEDS-ODDS"],
       [ACTIONS.REMIND_MISSING, "REMIND-ME"],
       [ACTIONS.LOCK_MATCH, "LOCK-ME"],
       [ACTIONS.PROMPT_RESULT, "RESULT-ME"],
     ]
   );
+});
+
+test("uses home zero handicap as the default missing odds patch", () => {
+  assert.deepEqual(buildDefaultOddsPatch(date("2026-06-12T13:00:00.000Z")), {
+    favoriteSide: SELECTIONS.HOME,
+    handicapSide: SELECTIONS.HOME,
+    handicapGoals: 0,
+    oddsLockedAt: "2026-06-12T13:00:00.000Z",
+  });
+});
+
+test("builds dry-run refresh patch that clears prior run state", () => {
+  assert.deepEqual(
+    buildDryRunMatchRefreshPatch({
+      matchId: "DRY-001",
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      kickoffUtc: "2026-06-12T05:30:00.000Z",
+      stage: "GROUP",
+      status: STATUSES.SCHEDULED,
+      favoriteSide: SELECTIONS.HOME,
+      handicapSide: SELECTIONS.HOME,
+      handicapGoals: 0.5,
+    }),
+    {
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      kickoffUtc: "2026-06-12T05:30:00.000Z",
+      stage: "GROUP",
+      status: STATUSES.SCHEDULED,
+      favoriteSide: SELECTIONS.HOME,
+      handicapSide: SELECTIONS.HOME,
+      handicapGoals: 0.5,
+      oddsLockedAt: "",
+      oddsAlertedAt: "",
+      openedAt: "",
+      reminded30At: "",
+      lockedAt: "",
+      adminResultPromptedAt: "",
+      finalHomeScore: "",
+      finalAwayScore: "",
+      finalSummary: "",
+      handicapOutcome: "",
+      settledAt: "",
+    }
+  );
+});
+
+test("creates home default picks when odds are still missing at lock", () => {
+  const match = {
+    matchId: "M003",
+  };
+
+  assert.deepEqual(createDefaultPicks(match, players, [], date("2026-06-12T19:00:00.000Z")), [
+    {
+      matchId: "M003",
+      telegramUserId: "101",
+      selection: SELECTIONS.HOME,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+    {
+      matchId: "M003",
+      telegramUserId: "102",
+      selection: SELECTIONS.HOME,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+  ]);
 });
 
 test("auto-opens a scheduled match after odds are set inside the T-6h window", () => {
@@ -213,6 +293,35 @@ test("auto-opens a scheduled match after odds are set inside the T-6h window", (
   );
 });
 
+test("set odds is allowed only before voting lock and kickoff", () => {
+  const now = date("2026-06-12T13:00:00.000Z");
+  const baseMatch = {
+    matchId: "M004",
+    status: STATUSES.OPEN,
+    kickoffUtc: "2026-06-12T19:00:00.000Z",
+  };
+
+  assert.equal(canSetOdds(baseMatch, now), true);
+  assert.equal(canSetOdds({ ...baseMatch, status: STATUSES.LOCKED }, now), false);
+  assert.equal(canSetOdds({ ...baseMatch, status: STATUSES.SETTLED }, now), false);
+  assert.equal(canSetOdds(baseMatch, date("2026-06-12T19:00:00.000Z")), false);
+});
+
+test("notifies players only when open match odds change", () => {
+  const match = {
+    matchId: "M005",
+    status: STATUSES.OPEN,
+    favoriteSide: SELECTIONS.HOME,
+    handicapSide: SELECTIONS.HOME,
+    handicapGoals: 0,
+  };
+
+  assert.equal(shouldNotifyOddsUpdate(match, SELECTIONS.HOME, 0.5), true);
+  assert.equal(shouldNotifyOddsUpdate(match, SELECTIONS.HOME, 0), false);
+  assert.equal(shouldNotifyOddsUpdate({ matchId: "M006", status: STATUSES.OPEN }, SELECTIONS.HOME, 0.5), true);
+  assert.equal(shouldNotifyOddsUpdate({ ...match, status: STATUSES.SCHEDULED }, SELECTIONS.HOME, 0.5), false);
+});
+
 test("formats cheerful recap with match events, scoring changes, and leaderboard", () => {
   const recap = formatRecap({
     match: {
@@ -234,8 +343,8 @@ test("formats cheerful recap with match events, scoring changes, and leaderboard
     ],
   });
 
-  assert.match(recap, /Argentina 2-1 Germany/);
-  assert.match(recap, /Đội thắng kèo: Argentina/);
+  assert.match(recap, /🇦🇷 Argentina 2-1 🇩🇪 Germany/);
+  assert.match(recap, /Đội thắng kèo: 🇦🇷 Argentina/);
   assert.match(recap, /Messi mở tỉ số/);
   assert.match(recap, /An \+2/);
   assert.match(recap, /Binh -1/);
@@ -265,6 +374,13 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/set_odds/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
+});
+
+test("formats known team names with flags and leaves unknown names unchanged", () => {
+  assert.equal(teamDisplayName("Argentina"), "🇦🇷 Argentina");
+  assert.equal(teamDisplayName("Côte d'Ivoire"), "🇨🇮 Côte d'Ivoire");
+  assert.equal(teamDisplayName("Northern Isles"), "Northern Isles");
+  assert.equal(teamFlagEmoji("USA"), "🇺🇸");
 });
 
 test("formats all picks in the next six hours for a player", () => {
@@ -304,10 +420,10 @@ test("formats all picks in the next six hours for a player", () => {
     }),
     [
       "📌 Pick các trận trong 6 giờ tới",
-      "M1: Argentina vs Germany",
+      "M1: 🇦🇷 Argentina vs 🇩🇪 Germany",
       "Giờ đá: 2026-06-12 12:30 GMT+7",
-      "Kèo: Argentina chấp Germany 0.5 Trái",
-      "Pick: Argentina ⭐",
+      "Kèo: 🇦🇷 Argentina chấp 🇩🇪 Germany 0.5 Trái",
+      "Pick: 🇦🇷 Argentina ⭐",
     ].join("\n")
   );
 });
@@ -320,7 +436,7 @@ test("formats handicap as positive odds with favorite first", () => {
       favoriteSide: SELECTIONS.HOME,
       handicapGoals: 0.5,
     }),
-    "Argentina chấp Germany 0.5 Trái"
+    "🇦🇷 Argentina chấp 🇩🇪 Germany 0.5 Trái"
   );
 });
 
@@ -354,7 +470,7 @@ test("formats negative handicap by reversing the favorite side", () => {
       handicapSide: SELECTIONS.HOME,
       handicapGoals: -0.5,
     }),
-    "Germany chấp Argentina 0.5 Trái"
+    "🇩🇪 Germany chấp 🇦🇷 Argentina 0.5 Trái"
   );
 });
 
@@ -384,9 +500,9 @@ test("parses callback data and builds pick keyboard", () => {
   });
 
   assert.deepEqual(keyboard.inline_keyboard[0], [
-    { text: "Brazil", callback_data: "pick|M001|HOME" },
+    { text: "🇧🇷 Brazil", callback_data: "pick|M001|HOME" },
     { text: "Hòa", callback_data: "pick|M001|DRAW" },
-    { text: "Japan", callback_data: "pick|M001|AWAY" },
+    { text: "🇯🇵 Japan", callback_data: "pick|M001|AWAY" },
   ]);
   assert.deepEqual(keyboard.inline_keyboard[1], [
     { text: "⭐ Ngôi sao hi vọng", callback_data: "star|M001|toggle" },
@@ -413,8 +529,10 @@ test("builds reset sheet selection and confirmation keyboards", () => {
 
 test("builds dry-run matches covering orchestration cases", () => {
   const matches = buildDryRunMatches("2026-06-12T00:00:00.000Z");
+  const teams = matches.flatMap((match) => [match.homeTeam, match.awayTeam]);
 
   assert.equal(matches.length, 5);
+  assert.equal(teams.every((team) => teamFlagEmoji(team)), true);
   assert.deepEqual(
     matches.map((match) => [match.matchId, match.stage, match.status, match.favoriteSide, match.handicapGoals]),
     [
@@ -426,6 +544,14 @@ test("builds dry-run matches covering orchestration cases", () => {
     ]
   );
   assert.equal(matches[0].kickoffUtc, "2026-06-12T05:30:00.000Z");
+});
+
+test("asks AI dry-run to use real national teams for flag testing", () => {
+  const prompt = buildDryRunPrompt("2026-06-12T00:00:00.000Z");
+
+  assert.match(prompt, /real national teams/i);
+  assert.match(prompt, /flag display/i);
+  assert.doesNotMatch(prompt, /clearly synthetic teams/i);
 });
 
 test("normalizes AI dry-run matches into orchestration-ready cases", () => {
@@ -505,8 +631,8 @@ test("omits draw button when handicap is not a whole number", () => {
   });
 
   assert.deepEqual(keyboard.inline_keyboard[0], [
-    { text: "Brazil", callback_data: "pick|M001|HOME" },
-    { text: "Japan", callback_data: "pick|M001|AWAY" },
+    { text: "🇧🇷 Brazil", callback_data: "pick|M001|HOME" },
+    { text: "🇯🇵 Japan", callback_data: "pick|M001|AWAY" },
   ]);
 });
 
@@ -520,9 +646,9 @@ test("keeps draw button when handicap is a whole number", () => {
   });
 
   assert.deepEqual(keyboard.inline_keyboard[0], [
-    { text: "Brazil", callback_data: "pick|M001|HOME" },
+    { text: "🇧🇷 Brazil", callback_data: "pick|M001|HOME" },
     { text: "Hòa", callback_data: "pick|M001|DRAW" },
-    { text: "Japan", callback_data: "pick|M001|AWAY" },
+    { text: "🇯🇵 Japan", callback_data: "pick|M001|AWAY" },
   ]);
 });
 
@@ -549,9 +675,9 @@ test("builds locked betting facts for AI lock message", () => {
     }),
     {
       matchId: "T001",
-      title: "Argentina vs Germany",
+      title: "🇦🇷 Argentina vs 🇩🇪 Germany",
       kickoff: "2026-06-13 03:00 GMT+7",
-      handicap: "Argentina chấp Germany 0.5 Trái",
+      handicap: "🇦🇷 Argentina chấp 🇩🇪 Germany 0.5 Trái",
       totalPicks: 3,
       homePicks: 2,
       drawPicks: 0,

@@ -156,9 +156,9 @@ Syntax:
 /dryrun 2026-06-12T00:00:00.000Z
 ```
 
-If omitted, the bot uses the current time when the command runs. The generated matches are scheduled relative to `baseTimeUtc`, with enough cases to test orchestration: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one scheduled match without odds to trigger the missing-odds alert.
+If omitted, the bot uses the current time when the command runs. The generated matches are scheduled relative to `baseTimeUtc`, with enough cases to test orchestration: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one scheduled match without odds to trigger the zero-handicap fallback.
 
-`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, inserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. If the AI call fails, the bot uses a deterministic fallback set. It does not clear existing data; existing `matchId`s are skipped, so use `/reset_sheet` first when you want a clean test run.
+`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, upserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. Existing `DRY-` matches are refreshed with the new schedule, odds, status, and cleared result fields. If the AI call fails, the bot uses a deterministic fallback set. Use `/reset_sheet` when you want to clear old dry-run picks and score rows too.
 
 Use `/dryrun_finish` to finish all unsettled `DRY-` matches immediately. The bot locks any dry-run match with odds, asks AI for synthetic final scores and match events, writes the result, and settles the matches. If the AI result call fails, it uses a deterministic fallback result for that match.
 

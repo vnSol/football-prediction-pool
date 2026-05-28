@@ -43,9 +43,19 @@ function sendToPlayers(players, text, replyMarkup) {
 
 function sendPickOpenMessage(match) {
   var text = [
-    "⚽ Mở pick: " + match.homeTeam + " vs " + match.awayTeam,
+    "⚽ Mở pick: " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
     "Giờ đá: " + formatKickoffTime(match.kickoffUtc),
     "Kèo: " + formatHandicap(match),
+    "Có thể đổi lựa chọn đến khi trận bắt đầu.",
+  ].join("\n");
+  sendToPlayers(getActivePlayers(), text, buildPickKeyboard(match));
+}
+
+function sendOddsUpdateMessage(match, previousHandicap) {
+  var text = [
+    "📢 Cập nhật kèo: " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
+    "Kèo cũ: " + previousHandicap,
+    "Kèo mới: " + formatHandicap(match),
     "Có thể đổi lựa chọn đến khi trận bắt đầu.",
   ].join("\n");
   sendToPlayers(getActivePlayers(), text, buildPickKeyboard(match));
@@ -65,7 +75,7 @@ function sendMissingPickReminders(match) {
     if (!pickedIds[String(player.telegramUserId)]) {
       sendTelegramMessage(
         player.telegramUserId,
-        "⏰ Còn khoảng 30 phút: " + match.homeTeam + " vs " + match.awayTeam + ". Chưa pick thì hệ thống sẽ auto chọn đội kèo trên lúc bóng lăn.",
+        "⏰ Còn khoảng 30 phút: " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Chưa pick thì hệ thống sẽ auto chọn đội kèo trên lúc bóng lăn.",
         buildPickKeyboard(match)
       );
     }
