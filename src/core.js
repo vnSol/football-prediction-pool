@@ -193,6 +193,40 @@ function formatLeaderboard(rows, limit) {
   );
 }
 
+function formatCommands(isAdmin) {
+  var lines = [
+    "📋 Commands khả dụng",
+    "",
+    "Player:",
+    "/commands - Xem danh sách lệnh",
+    "/matches - Xem các trận đang mở pick",
+    "/mypick - Xem pick của bạn trong 6 giờ tới",
+    "/mypick <matchId> - Xem pick của một trận",
+    "/leaderboard - Xem bảng xếp hạng",
+  ];
+
+  if (isAdmin) {
+    lines = lines.concat([
+      "",
+      "Admin:",
+      "/add_player <telegramUserId> <display name> - Thêm người chơi",
+      "/set_player_active <telegramUserId> <true|false> - Bật/tắt người chơi",
+      "/add_match <matchId> <kickoffUtc> <GROUP|KNOCKOUT> <home team> vs <away team> - Thêm trận",
+      "/set_match_time <matchId> <kickoffUtc> - Sửa giờ đá",
+      "/set_odds <matchId> <HOME|AWAY> <handicap> - Nhập kèo",
+      "/open <matchId> - Mở pick thủ công",
+      "/lock <matchId> - Khóa pick thủ công",
+      "/result <matchId> <home-away> <diễn biến> - Nhập kết quả",
+      "/settle <matchId> - Chốt điểm",
+      "/recap <matchId> - Gửi lại recap",
+      "/reset_sheet - Reset dữ liệu sheet",
+      "/dryrun [baseTimeUtc] - Tạo dữ liệu mô phỏng",
+    ]);
+  }
+
+  return lines.join("\n");
+}
+
 function formatMyUpcomingPicks(input) {
   var now = toDate(input.now || new Date());
   var picksByMatchId = {};
@@ -592,6 +626,7 @@ if (typeof module !== "undefined") {
     buildDryRunPrompt: buildDryRunPrompt,
     normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
     formatHandicap: formatHandicap,
+    formatCommands: formatCommands,
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,

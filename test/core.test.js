@@ -11,6 +11,7 @@ const {
   formatKickoffTime,
   formatLeaderboard,
   formatHandicap,
+  formatCommands,
   formatOpenMatchMessage,
   formatRecap,
   formatMyUpcomingPicks,
@@ -246,6 +247,19 @@ test("formats leaderboard in rank order", () => {
     ]),
     "🏆 Leaderboard\n1. An - 4 điểm\n2. Binh - 3 điểm"
   );
+});
+
+test("formats commands by account role", () => {
+  var playerCommands = formatCommands(false);
+  var adminCommands = formatCommands(true);
+
+  assert.match(playerCommands, /\/matches/);
+  assert.match(playerCommands, /\/mypick/);
+  assert.doesNotMatch(playerCommands, /\/set_odds/);
+
+  assert.match(adminCommands, /\/matches/);
+  assert.match(adminCommands, /\/set_odds/);
+  assert.match(adminCommands, /\/dryrun/);
 });
 
 test("formats all picks in the next six hours for a player", () => {

@@ -90,9 +90,10 @@ function handleMessage(message) {
   var admin = isAdminChatId(chatId) || isAdminChatId(message.from.id);
 
   if (command.name === "start") {
-    sendTelegramMessage(chatId, "Bot World Cup Prediction Pool đã sẵn sàng. Dùng /matches để xem trận đang mở.");
+    sendTelegramMessage(chatId, "Bot World Cup Prediction Pool đã sẵn sàng. Dùng /commands để xem danh sách lệnh.");
     return;
   }
+  if (command.name === "commands") return sendTelegramMessage(chatId, formatCommands(admin));
   if (command.name === "matches") return sendOpenMatches(chatId);
   if (command.name === "leaderboard") return sendTelegramMessage(chatId, formatLeaderboard(getLeaderboard(), 20));
   if (command.name === "mypick") return sendMyPick(chatId, player, command.args[0]);
