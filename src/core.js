@@ -502,6 +502,24 @@ function formatKickoffTime(value) {
   ].join("");
 }
 
+function formatTimeUntilKickoff(value, now) {
+  var remainingMinutes = Math.ceil((toDate(value).getTime() - toDate(now || new Date()).getTime()) / 60000);
+  if (remainingMinutes <= 0) return "Đã bắt đầu";
+  var hours = Math.floor(remainingMinutes / 60);
+  var minutes = remainingMinutes % 60;
+  if (hours === 0) return minutes + " phút";
+  if (minutes === 0) return hours + " giờ";
+  return hours + " giờ " + minutes + " phút";
+}
+
+function formatOpenMatchMessage(match, now) {
+  return [
+    match.matchId + ": " + match.homeTeam + " vs " + match.awayTeam,
+    "Kèo: " + formatHandicap(match),
+    "Còn lại: " + formatTimeUntilKickoff(match.kickoffUtc, now || new Date()),
+  ].join("\n");
+}
+
 function getTelegramUpdateDedupeKey(update) {
   if (!update) return "";
   if (update.update_id != null) return "update:" + String(update.update_id);
@@ -577,7 +595,9 @@ if (typeof module !== "undefined") {
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,
+    formatOpenMatchMessage: formatOpenMatchMessage,
     formatRecap: formatRecap,
+    formatTimeUntilKickoff: formatTimeUntilKickoff,
     getHandicapOutcome: getHandicapOutcome,
     getSchedulerActions: getSchedulerActions,
     getTelegramUpdateDedupeKey: getTelegramUpdateDedupeKey,

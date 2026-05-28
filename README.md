@@ -89,7 +89,7 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 
 ## Player Commands
 
-- `/matches`: show open matches.
+- `/matches`: show open matches with each match's remaining time before kickoff.
 - `/mypick`: show picks, including missing picks, for matches in the next 6 hours.
 - `/mypick <matchId>`: show current pick for one match.
 - `/leaderboard`: show leaderboard.

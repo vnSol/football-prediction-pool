@@ -11,6 +11,7 @@ const {
   formatKickoffTime,
   formatLeaderboard,
   formatHandicap,
+  formatOpenMatchMessage,
   formatRecap,
   formatMyUpcomingPicks,
   getSchedulerActions,
@@ -301,6 +302,27 @@ test("formats handicap as positive odds with favorite first", () => {
       handicapGoals: 0.5,
     }),
     "Argentina chấp Germany 0.5 Trái"
+  );
+});
+
+test("formats open match message with time remaining", () => {
+  assert.equal(
+    formatOpenMatchMessage(
+      {
+        matchId: "G1003",
+        homeTeam: "Northern Isles",
+        awayTeam: "Kazan Federation",
+        kickoffUtc: "2026-06-12T18:30:00.000Z",
+        favoriteSide: SELECTIONS.HOME,
+        handicapGoals: 0.5,
+      },
+      date("2026-06-12T13:00:00.000Z")
+    ),
+    [
+      "G1003: Northern Isles vs Kazan Federation",
+      "Kèo: Northern Isles chấp Kazan Federation 0.5 Trái",
+      "Còn lại: 5 giờ 30 phút",
+    ].join("\n")
   );
 });
 

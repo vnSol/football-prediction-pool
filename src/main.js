@@ -287,6 +287,7 @@ function adminDryRun(chatId, actor, args) {
 }
 
 function sendOpenMatches(chatId) {
+  var now = new Date();
   var matches = getMatches().filter(function (match) {
     return match.status === STATUSES.OPEN;
   });
@@ -297,7 +298,7 @@ function sendOpenMatches(chatId) {
   matches.forEach(function (match) {
     sendTelegramMessage(
       chatId,
-      match.matchId + ": " + match.homeTeam + " vs " + match.awayTeam + "\nKèo: " + formatHandicap(match),
+      formatOpenMatchMessage(match, now),
       buildPickKeyboard(match)
     );
   });
