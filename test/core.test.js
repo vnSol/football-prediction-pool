@@ -24,6 +24,7 @@ const {
   formatMyUpcomingPicks,
   formatMissingPickReminderMessage,
   formatRules,
+  formatPickConfirmationMessage,
   formatJoinAdminMessage,
   formatJoinMessage,
   formatLockedPickSummary,
@@ -575,6 +576,26 @@ test("formats all picks in the next 24 hours for a player", () => {
       "Giờ đá: 2026-06-12 14:00 GMT+7",
       "Kèo: 🇯🇵 Japan chấp 🇧🇷 Brazil 1 Trái",
       "Pick: 🇯🇵 Japan",
+    ].join("\n")
+  );
+});
+
+test("formats pick confirmation with match context", () => {
+  assert.equal(
+    formatPickConfirmationMessage(
+      {
+        matchId: "M001",
+        homeTeam: "Argentina",
+        awayTeam: "Germany",
+      },
+      {
+        selection: SELECTIONS.HOME,
+        star: true,
+      }
+    ),
+    [
+      "✅ Pick đã ghi cho M001: 🇦🇷 Argentina vs 🇩🇪 Germany",
+      "Lựa chọn: 🇦🇷 Argentina ⭐",
     ].join("\n")
   );
 });

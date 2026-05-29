@@ -247,8 +247,8 @@ function handleCallbackQuery(callbackQuery) {
   if (data.action === "pick" && isValidSelection(data.value)) {
     var previous = getPick(match.matchId, telegramUserId);
     var pick = upsertPick(match, player, data.value, previous ? previous.star : false, SOURCE.TELEGRAM, telegramUserId);
-    answerCallbackQuery(callbackQuery.id, "Đã chọn: " + sideDisplayName(match, pick.selection));
-    sendTelegramMessage(chatId, "✅ Pick hiện tại của bạn: " + sideDisplayName(match, pick.selection) + (pick.star ? " ⭐" : ""));
+    answerCallbackQuery(callbackQuery.id, "Đã chọn " + match.matchId + ": " + sideDisplayName(match, pick.selection));
+    sendTelegramMessage(chatId, formatPickConfirmationMessage(match, pick));
     return;
   }
 
@@ -264,7 +264,7 @@ function handleCallbackQuery(callbackQuery) {
     }
     var updated = upsertPick(match, player, existing.selection, !parseBoolean(existing.star), SOURCE.TELEGRAM, telegramUserId);
     answerCallbackQuery(callbackQuery.id, updated.star ? "Đã bật ngôi sao." : "Đã tắt ngôi sao.");
-    sendTelegramMessage(chatId, "✅ Pick hiện tại của bạn: " + sideDisplayName(match, updated.selection) + (updated.star ? " ⭐" : ""));
+    sendTelegramMessage(chatId, formatPickConfirmationMessage(match, updated));
   }
 }
 

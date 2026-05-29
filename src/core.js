@@ -607,6 +607,13 @@ function formatMyUpcomingPicks(input) {
   );
 }
 
+function formatPickConfirmationMessage(match, pick) {
+  return [
+    "✅ Pick đã ghi cho " + match.matchId + ": " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
+    "Lựa chọn: " + sideDisplayName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : ""),
+  ].join("\n");
+}
+
 function formatMissingPickReminderMessage(match, reminderMinutes) {
   var label = Number(reminderMinutes) <= MISSING_PICK_REMINDER_30M_MINUTES ? "Còn dưới 30 phút" : "Còn dưới 2 giờ";
   return (
@@ -1607,6 +1614,7 @@ if (typeof module !== "undefined") {
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,
     formatMissingPickReminderMessage: formatMissingPickReminderMessage,
+    formatPickConfirmationMessage: formatPickConfirmationMessage,
     formatRules: formatRules,
     formatJoinAdminMessage: formatJoinAdminMessage,
     formatJoinMessage: formatJoinMessage,
