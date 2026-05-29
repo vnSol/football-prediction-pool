@@ -37,13 +37,13 @@ node --check src/main.js
 1. Create a Google Sheet.
 2. Create an Apps Script project bound to that Sheet, or configure `SPREADSHEET_ID` for a standalone script.
 3. Add the files in `src/` and `appsscript.json` to the Apps Script project.
-4. In Apps Script, set Script Properties:
-   - `TELEGRAM_BOT_TOKEN`: Telegram bot token.
-   - `ADMIN_CHAT_IDS`: comma-separated admin Telegram chat IDs.
-   - `OPENAI_API_KEY`: OpenAI API key for AI lock messages and match recaps.
-   - `OPENAI_MODEL`: optional; defaults to `gpt-5-mini`.
-   - `RECAP_CHAT_ID`: group/channel chat ID for AI lock summaries and recap messages. If omitted, those broadcasts are skipped.
-   - `SPREADSHEET_ID`: optional Sheet ID if the script is not bound to the Sheet.
+4. In Apps Script, open `Project Settings > Script properties` and add:
+   - `TELEGRAM_BOT_TOKEN`: create a bot with [@BotFather](https://t.me/BotFather), run `/newbot`, and copy the token it returns.
+   - `ADMIN_CHAT_IDS`: comma-separated Telegram IDs allowed to run admin commands. To find an ID, send a message or command to the bot, open `https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates`, and copy `message.from.id` for a user admin or `message.chat.id` for an admin chat/group.
+   - `OPENAI_API_KEY`: create an API key at the [OpenAI API keys page](https://platform.openai.com/api-keys) and paste the secret key value.
+   - `OPENAI_MODEL`: optional model ID override. Leave unset to use `gpt-5-mini`.
+   - `RECAP_CHAT_ID`: group/channel chat ID for AI lock summaries and recap messages. Add the bot to the target group/channel, post a message, call `getUpdates`, and copy `message.chat.id` or `channel_post.chat.id`. If omitted, those broadcasts are skipped.
+   - `SPREADSHEET_ID`: optional Sheet ID if the script is not bound to the Sheet. Copy the value between `/d/` and `/edit` in the Google Sheets URL.
 5. Run `setup()` once from Apps Script. This creates/protects tabs and installs triggers.
 6. Deploy as Web App, execute as owner, accessible by Telegram.
 7. Run `setTelegramWebhook("YOUR_WEB_APP_URL")` from Apps Script.
