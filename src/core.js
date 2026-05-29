@@ -438,6 +438,7 @@ function formatCommands(isAdmin) {
     "📋 Commands khả dụng",
     "",
     "Player:",
+    "/join - Tham gia pool và tự kích hoạt tài khoản",
     "/commands - Xem danh sách lệnh",
     "/matches - Xem các trận đang mở pick",
     "/mypick - Xem pick của bạn trong 6 giờ tới",
@@ -466,6 +467,31 @@ function formatCommands(isAdmin) {
   }
 
   return lines.join("\n");
+}
+
+function formatTelegramDisplayName(user) {
+  var firstName = String((user && user.first_name) || "").trim();
+  var lastName = String((user && user.last_name) || "").trim();
+  var fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+  if (fullName) return fullName;
+  var username = String((user && user.username) || "").trim();
+  if (username) return "@" + username;
+  return String((user && user.id) || "").trim();
+}
+
+function formatJoinMessage(player, created) {
+  var name = (player && player.displayName) || "Bạn";
+  return created
+    ? "✅ Đã tham gia pool: " + name + ". Dùng /matches để xem các trận đang mở pick."
+    : "✅ " + name + " đã active lại. Dùng /matches để xem các trận đang mở pick.";
+}
+
+function formatJoinAdminMessage(player, created) {
+  var name = (player && player.displayName) || "Unknown";
+  var telegramUserId = (player && player.telegramUserId) || "";
+  return created
+    ? "👤 Có người chơi mới /join: " + name + " (" + telegramUserId + "), active=true."
+    : "👤 Người chơi /join đã được bật lại active=true: " + name + " (" + telegramUserId + ").";
 }
 
 function formatMyUpcomingPicks(input) {
@@ -1299,6 +1325,9 @@ if (typeof module !== "undefined") {
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,
+    formatJoinAdminMessage: formatJoinAdminMessage,
+    formatJoinMessage: formatJoinMessage,
+    formatTelegramDisplayName: formatTelegramDisplayName,
     formatOpenMatchMessage: formatOpenMatchMessage,
     formatRecap: formatRecap,
     formatTimeUntilKickoff: formatTimeUntilKickoff,

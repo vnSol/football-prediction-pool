@@ -22,6 +22,9 @@ const {
   formatOpenMatchMessage,
   formatRecap,
   formatMyUpcomingPicks,
+  formatJoinAdminMessage,
+  formatJoinMessage,
+  formatTelegramDisplayName,
   getSchedulerActions,
   getTelegramUpdateDedupeKey,
   parseAddMatchArgs,
@@ -401,6 +404,7 @@ test("formats commands by account role", () => {
   var playerCommands = formatCommands(false);
   var adminCommands = formatCommands(true);
 
+  assert.match(playerCommands, /\/join/);
   assert.match(playerCommands, /\/matches/);
   assert.match(playerCommands, /\/mypick/);
   assert.doesNotMatch(playerCommands, /\/set_odds/);
@@ -410,6 +414,24 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
   assert.match(adminCommands, /đề xuất kết quả/);
+});
+
+test("formats Telegram join display names and welcome message", () => {
+  assert.equal(
+    formatTelegramDisplayName({
+      first_name: "Viet",
+      last_name: "Mai Hoang",
+      username: "vietmh",
+    }),
+    "Viet Mai Hoang"
+  );
+  assert.equal(formatTelegramDisplayName({ username: "vietmh" }), "@vietmh");
+  assert.equal(formatTelegramDisplayName({ id: 12345 }), "12345");
+
+  assert.match(formatJoinMessage({ displayName: "Viet Mai Hoang" }, true), /Đã tham gia/);
+  assert.match(formatJoinMessage({ displayName: "Viet Mai Hoang" }, false), /đã active lại/);
+  assert.match(formatJoinAdminMessage({ telegramUserId: "12345", displayName: "Viet Mai Hoang" }, true), /người chơi mới/);
+  assert.match(formatJoinAdminMessage({ telegramUserId: "12345", displayName: "Viet Mai Hoang" }, false), /active=true/);
 });
 
 test("formats known team names with flags and leaves unknown names unchanged", () => {

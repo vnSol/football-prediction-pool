@@ -247,6 +247,25 @@ function addPlayer(player, actor) {
   return { ok: true, player: player };
 }
 
+function upsertJoinedPlayer(user, actor) {
+  var player = {
+    telegramUserId: String(user.id),
+    displayName: formatTelegramDisplayName(user),
+    active: true,
+    isAdmin: false,
+  };
+  var existing = getPlayerByTelegramId(player.telegramUserId);
+  if (!existing) {
+    appendAuditedObject(SHEETS.PLAYERS, player, actor, "JOIN_PLAYER", "Player", player.telegramUserId);
+    return { created: true, reactivated: false, player: player };
+  }
+  if (existing.active === false || String(existing.active).toLowerCase() === "false") {
+    var result = setPlayerActive(player.telegramUserId, true, actor);
+    return { created: false, reactivated: true, player: result.after };
+  }
+  return { created: false, reactivated: false, player: existing };
+}
+
 function setPlayerActive(telegramUserId, active, actor) {
   var result = updateObject(
     SHEETS.PLAYERS,

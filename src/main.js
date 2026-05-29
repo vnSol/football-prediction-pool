@@ -90,9 +90,10 @@ function handleMessage(message) {
   var admin = isAdminChatId(chatId) || isAdminChatId(message.from.id);
 
   if (command.name === "start") {
-    sendTelegramMessage(chatId, "Bot World Cup Prediction Pool đã sẵn sàng. Dùng /commands để xem danh sách lệnh.");
+    sendTelegramMessage(chatId, "Bot World Cup Prediction Pool đã sẵn sàng. Dùng /join để tham gia pool hoặc /commands để xem danh sách lệnh.");
     return;
   }
+  if (command.name === "join") return joinPool(chatId, message.from);
   if (command.name === "commands") return sendTelegramMessage(chatId, formatCommands(admin));
   if (command.name === "matches") return sendOpenMatches(chatId);
   if (command.name === "leaderboard") return sendTelegramMessage(chatId, formatLeaderboard(getLeaderboard(), 20));
@@ -116,6 +117,28 @@ function handleMessage(message) {
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
   if (command.name === "settle") return settleMatch(command.args[0], message.from.id, chatId);
   if (command.name === "recap") return resendRecap(command.args[0], chatId);
+}
+
+function joinPool(chatId, user) {
+  if (!user || !user.id) {
+    sendTelegramMessage(chatId, "Không đọc được Telegram ID. Hãy thử lại bằng tài khoản Telegram của bạn.");
+    return;
+  }
+  var result = upsertJoinedPlayer(user, user.id);
+  sendTelegramMessage(chatId, formatJoinMessage(result.player, result.created));
+  if (result.created || result.reactivated) {
+    sendToAdmins(formatJoinAdminMessage(result.player, result.created));
+  }
+  sendTelegramMessage(
+    chatId,
+    formatMyUpcomingPicks({
+      now: new Date(),
+      matches: getMatches(),
+      picks: getPicks().filter(function (pick) {
+        return String(pick.telegramUserId) === String(user.id);
+      }),
+    })
+  );
 }
 
 function adminAddPlayer(chatId, actor, args) {

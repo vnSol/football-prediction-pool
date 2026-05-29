@@ -7,6 +7,7 @@ Google Apps Script + Telegram Bot automation for an internal World Cup predictio
 - At T-6h, uses AI/web search to propose missing handicap odds for admin verification, then opens picks after admin confirms.
 - Opens Telegram picks after odds are set.
 - Lets players change picks through Telegram until kickoff.
+- Lets players self-register in the private group with `/join`.
 - Sends T-30m reminders to players who have not picked.
 - Locks at kickoff and defaults missing picks to the favorite side.
 - At T+120m, uses AI/web search to propose score, match status, and public source links for admin verification.
@@ -92,6 +93,7 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 ## Player Commands
 
 - `/commands`: show available commands for the current account role.
+- `/join`: join the pool and activate the Telegram account for scoring.
 - `/matches`: show open matches with each match's remaining time before kickoff.
 - `/mypick`: show picks, including missing picks, for matches in the next 6 hours.
 - `/mypick <matchId>`: show current pick for one match.
@@ -115,6 +117,8 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 - `/recap <matchId>`
 
 Manual commands are fallback controls. Normal flow is handled by `runScheduler()`. If `/set_odds` is used for a scheduled match inside T-6h, the bot opens pick immediately.
+
+In a private group, players can use `/join` to add themselves to `Players` with `active=true`. The bot uses their Telegram profile name when available, then immediately replies with current open matches so late joiners can pick without waiting for another broadcast. Admins are notified when `/join` creates a new player or reactivates an inactive player.
 
 ## AI Messages
 
