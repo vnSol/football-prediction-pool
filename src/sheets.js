@@ -38,6 +38,13 @@ SHEET_HEADERS[SHEETS.MATCHES] = [
   "resultProposalAt",
   "resultProposalDecision",
   "resultProposalDecidedAt",
+  "oddsProposalFavoriteSide",
+  "oddsProposalHandicapGoals",
+  "oddsProposalSummary",
+  "oddsProposalSources",
+  "oddsProposalAt",
+  "oddsProposalDecision",
+  "oddsProposalDecidedAt",
 ];
 SHEET_HEADERS[SHEETS.PICKS] = [
   "matchId",

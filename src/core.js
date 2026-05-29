@@ -232,6 +232,13 @@ function buildDryRunMatchRefreshPatch(match) {
     handicapGoals: match.handicapGoals,
     oddsLockedAt: "",
     oddsAlertedAt: "",
+    oddsProposalFavoriteSide: "",
+    oddsProposalHandicapGoals: "",
+    oddsProposalSummary: "",
+    oddsProposalSources: "",
+    oddsProposalAt: "",
+    oddsProposalDecision: "",
+    oddsProposalDecidedAt: "",
     openedAt: "",
     reminded30At: "",
     lockedAt: "",
@@ -358,6 +365,15 @@ function getSchedulerActions(matches, picks, now) {
     var untilHours = hoursUntil(match, now);
 
     if (match.status === STATUSES.SCHEDULED && untilHours <= 6 && untilMinutes > 0) {
+      if (!hasLockedOdds(match)) {
+        if (!match.oddsAlertedAt) {
+          actions.push({
+            type: ACTIONS.ODDS_ALERT,
+            matchId: match.matchId,
+          });
+        }
+        return;
+      }
       actions.push({
         type: ACTIONS.OPEN_PICK,
         matchId: match.matchId,
@@ -731,6 +747,139 @@ function buildConfirmResultProposalPatch(match, now) {
   };
 }
 
+function buildAiOddsProposalPrompt(match) {
+  return [
+    "Bạn là trợ lý vận hành cho game dự đoán bóng đá nội bộ.",
+    "Trước T-6h, hãy dùng web search để đọc 1-2 nguồn public về Asian handicap/handicap line cho trận này và đề xuất kèo để admin confirm.",
+    "Ưu tiên nguồn odds/handicap public có ghi rõ line chấp, ví dụ odds aggregator, bookmaker page public, preview có kèo châu Á, hoặc trang thống kê odds.",
+    "Chỉ đề xuất khi nguồn public đủ rõ; nếu chưa rõ thì favoriteSide và handicapGoals là null.",
+    "Không bịa kèo, nguồn hoặc diễn giải. Nếu nhiều nguồn lệch nhau, chọn line phổ biến nhất và ghi rõ trong summary.",
+    "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
+    "",
+    "Schema:",
+    '{ "favoriteSide": "HOME|AWAY|null", "handicapGoals": number|null, "summary": "ngắn gọn", "sources": ["https://...", "https://..."] }',
+    "",
+    "Quy ước:",
+    "- favoriteSide là đội chấp theo line đề xuất.",
+    "- handicapGoals là số trái chấp không âm, ví dụ 0, 0.25, 0.5, 0.75, 1.",
+    "",
+    "Match facts:",
+    "- matchId: " + match.matchId,
+    "- homeTeam: " + sideName(match, SELECTIONS.HOME),
+    "- awayTeam: " + sideName(match, SELECTIONS.AWAY),
+    "- kickoff: " + formatKickoffTime(match.kickoffUtc),
+  ].join("\n");
+}
+
+function normalizeAiOddsProposal(result) {
+  var favoriteSide = normalizeProposalSelection(result && result.favoriteSide);
+  var handicapGoals = normalizeProposalHandicap(result && result.handicapGoals);
+  if ((favoriteSide == null) !== (handicapGoals == null)) throw new Error("AI odds proposal has partial handicap");
+  return {
+    favoriteSide: favoriteSide,
+    handicapGoals: handicapGoals,
+    summary: sanitizeProposalText(result && result.summary) || "Chưa có kèo public đủ rõ.",
+    sources: normalizeProposalSources(result && (result.sources || result.sourceUrls || result.links)),
+  };
+}
+
+function normalizeProposalSelection(value) {
+  if (value === "" || value == null || String(value).toLowerCase() === "null") return null;
+  var side = String(value).toUpperCase();
+  if (side === "HOME" || side === "H") return SELECTIONS.HOME;
+  if (side === "AWAY" || side === "A") return SELECTIONS.AWAY;
+  throw new Error("AI odds proposal invalid favoriteSide");
+}
+
+function normalizeProposalHandicap(value) {
+  if (value === "" || value == null || String(value).toLowerCase() === "null") return null;
+  var handicap = Number(value);
+  if (!isFinite(handicap) || handicap < 0 || handicap > 6) throw new Error("AI odds proposal invalid handicap");
+  return handicap;
+}
+
+function hasProposalOdds(proposal) {
+  return proposal && proposal.favoriteSide && proposal.handicapGoals != null;
+}
+
+function formatAdminOddsProposal(match, proposal) {
+  var normalized = normalizeAiOddsProposal(proposal || {});
+  var oddsText = hasProposalOdds(normalized)
+    ? formatHandicap({
+        homeTeam: match.homeTeam,
+        awayTeam: match.awayTeam,
+        favoriteSide: normalized.favoriteSide,
+        handicapSide: normalized.favoriteSide,
+        handicapGoals: normalized.handicapGoals,
+      })
+    : "chưa có kèo đủ rõ";
+  var sourceLines = normalized.sources.length
+    ? normalized.sources.map(function (source) { return "- " + source; })
+    : ["- Chưa có link public đủ rõ."];
+  var instructionLine = hasProposalOdds(normalized)
+    ? "Admin verify link nguồn rồi bấm Y để ghi kèo và mở pick, hoặc N để reject."
+    : "Admin verify link nguồn; đề xuất chưa có kèo đủ rõ nên bấm N rồi nhập tay nếu cần.";
+  var actionLine = hasProposalOdds(normalized)
+    ? "Bấm Y để ghi kèo và mở pick tự động."
+    : "Không có kèo đủ rõ để confirm; bấm N rồi nhập tay bằng /set_odds " + match.matchId + " <HOME|AWAY> <handicap>.";
+
+  return [
+    "⚖️ Đề xuất kèo AI/search cho " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
+    "Kèo đề xuất: " + oddsText,
+    "Tóm tắt: " + normalized.summary,
+    "Nguồn để verify:",
+    sourceLines.join("\n"),
+    "",
+    instructionLine,
+    actionLine,
+  ].join("\n");
+}
+
+function buildOddsProposalPatch(proposal, now) {
+  var normalized = normalizeAiOddsProposal(proposal || {});
+  return {
+    oddsProposalFavoriteSide: normalized.favoriteSide || "",
+    oddsProposalHandicapGoals: normalized.handicapGoals == null ? "" : normalized.handicapGoals,
+    oddsProposalSummary: normalized.summary,
+    oddsProposalSources: normalized.sources.join("\n"),
+    oddsProposalAt: toIso(now || new Date()),
+    oddsProposalDecision: "",
+    oddsProposalDecidedAt: "",
+  };
+}
+
+function buildOddsProposalConfirmKeyboard(matchId, proposal) {
+  var normalized = normalizeAiOddsProposal(proposal || {});
+  if (!hasProposalOdds(normalized)) {
+    return {
+      inline_keyboard: [[{ text: "N - Reject", callback_data: "odds_reject|" + matchId + "|" }]],
+    };
+  }
+  return {
+    inline_keyboard: [
+      [
+        { text: "Y - Confirm & open", callback_data: "odds_confirm|" + matchId + "|" },
+        { text: "N - Reject", callback_data: "odds_reject|" + matchId + "|" },
+      ],
+    ],
+  };
+}
+
+function buildConfirmOddsProposalPatch(match, now) {
+  var favoriteSide = normalizeProposalSelection(match && match.oddsProposalFavoriteSide);
+  var handicapGoals = normalizeProposalHandicap(match && match.oddsProposalHandicapGoals);
+  if (!favoriteSide || handicapGoals == null) throw new Error("Odds proposal missing handicap");
+  var iso = toIso(now || new Date());
+  return {
+    favoriteSide: favoriteSide,
+    handicapSide: favoriteSide,
+    handicapGoals: handicapGoals,
+    oddsLockedAt: iso,
+    oddsProposalDecision: "CONFIRMED",
+    oddsProposalDecidedAt: iso,
+  };
+}
+
 function formatHandicap(match) {
   var handicap = Number(match.handicapGoals || 0);
   var handicapSide = match.handicapSide || match.favoriteSide;
@@ -1002,6 +1151,15 @@ function buildDryRunResultProposal(match) {
   };
 }
 
+function buildDryRunOddsProposal(match) {
+  return {
+    favoriteSide: isValidSelection(match.favoriteSide) ? match.favoriteSide : SELECTIONS.HOME,
+    handicapGoals: 0.5,
+    summary: "Kèo mô phỏng để test luồng AI/search đề xuất handicap và admin confirm.",
+    sources: [],
+  };
+}
+
 function shouldShowDrawOption(match) {
   return Number.isInteger(Math.abs(Number(match.handicapGoals || 0)));
 }
@@ -1111,6 +1269,7 @@ if (typeof module !== "undefined") {
     canChangePick: canChangePick,
     canSetOdds: canSetOdds,
     buildPickKeyboard: buildPickKeyboard,
+    buildAiOddsProposalPrompt: buildAiOddsProposalPrompt,
     buildAiRecapPrompt: buildAiRecapPrompt,
     buildAiResultProposalPrompt: buildAiResultProposalPrompt,
     buildLockDramaPrompt: buildLockDramaPrompt,
@@ -1121,15 +1280,21 @@ if (typeof module !== "undefined") {
     buildDryRunPrompt: buildDryRunPrompt,
     buildDryRunResultPrompt: buildDryRunResultPrompt,
     buildDryRunResultProposal: buildDryRunResultProposal,
+    buildDryRunOddsProposal: buildDryRunOddsProposal,
+    buildOddsProposalConfirmKeyboard: buildOddsProposalConfirmKeyboard,
+    buildOddsProposalPatch: buildOddsProposalPatch,
     buildResultProposalConfirmKeyboard: buildResultProposalConfirmKeyboard,
     buildResultProposalPatch: buildResultProposalPatch,
+    buildConfirmOddsProposalPatch: buildConfirmOddsProposalPatch,
     buildConfirmResultProposalPatch: buildConfirmResultProposalPatch,
     buildFallbackDryRunResult: buildFallbackDryRunResult,
     normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
     normalizeDryRunResult: normalizeDryRunResult,
+    normalizeAiOddsProposal: normalizeAiOddsProposal,
     normalizeAiResultProposal: normalizeAiResultProposal,
     formatHandicap: formatHandicap,
     formatCommands: formatCommands,
+    formatAdminOddsProposal: formatAdminOddsProposal,
     formatAdminResultProposal: formatAdminResultProposal,
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,

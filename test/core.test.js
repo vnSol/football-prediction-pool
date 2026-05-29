@@ -12,11 +12,13 @@ const {
   createDefaultPicks,
   buildPickKeyboard,
   buildAiResultProposalPrompt,
+  buildAiOddsProposalPrompt,
   formatKickoffTime,
   formatLeaderboard,
   formatHandicap,
   formatCommands,
   formatAdminResultProposal,
+  formatAdminOddsProposal,
   formatOpenMatchMessage,
   formatRecap,
   formatMyUpcomingPicks,
@@ -33,12 +35,17 @@ const {
   buildDryRunPrompt,
   buildDryRunResultPrompt,
   buildDryRunResultProposal,
+  buildDryRunOddsProposal,
+  buildOddsProposalConfirmKeyboard,
+  buildOddsProposalPatch,
   buildResultProposalConfirmKeyboard,
   buildResultProposalPatch,
+  buildConfirmOddsProposalPatch,
   buildConfirmResultProposalPatch,
   normalizeDryRunMatchesForOrchestration,
   normalizeDryRunResult,
   normalizeAiResultProposal,
+  normalizeAiOddsProposal,
   parseCallbackData,
   parseTelegramCommand,
   getDryRunFinishTime,
@@ -148,7 +155,7 @@ test("creates default picks for active players who missed kickoff", () => {
   ]);
 });
 
-test("scheduler opens picks with zero handicap when odds are missing", () => {
+test("scheduler prompts for odds instead of opening when odds are missing", () => {
   const now = date("2026-06-12T13:00:00.000Z");
   const matches = [
     {
@@ -162,6 +169,12 @@ test("scheduler opens picks with zero handicap when odds are missing", () => {
       matchId: "NEEDS-ODDS",
       status: STATUSES.SCHEDULED,
       kickoffUtc: "2026-06-12T18:30:00.000Z",
+    },
+    {
+      matchId: "ODDS-PROMPTED",
+      status: STATUSES.SCHEDULED,
+      kickoffUtc: "2026-06-12T18:45:00.000Z",
+      oddsAlertedAt: "2026-06-12T12:30:00.000Z",
     },
     {
       matchId: "REMIND-ME",
@@ -187,7 +200,7 @@ test("scheduler opens picks with zero handicap when odds are missing", () => {
     actions.map((action) => [action.type, action.matchId]),
     [
       [ACTIONS.OPEN_PICK, "OPEN-ME"],
-      [ACTIONS.OPEN_PICK, "NEEDS-ODDS"],
+      [ACTIONS.ODDS_ALERT, "NEEDS-ODDS"],
       [ACTIONS.REMIND_MISSING, "REMIND-ME"],
       [ACTIONS.LOCK_MATCH, "LOCK-ME"],
       [ACTIONS.PROMPT_RESULT, "RESULT-ME"],
@@ -228,6 +241,13 @@ test("builds dry-run refresh patch that clears prior run state", () => {
       handicapGoals: 0.5,
       oddsLockedAt: "",
       oddsAlertedAt: "",
+      oddsProposalFavoriteSide: "",
+      oddsProposalHandicapGoals: "",
+      oddsProposalSummary: "",
+      oddsProposalSources: "",
+      oddsProposalAt: "",
+      oddsProposalDecision: "",
+      oddsProposalDecidedAt: "",
       openedAt: "",
       reminded30At: "",
       lockedAt: "",
@@ -866,6 +886,110 @@ test("builds final result patch from confirmed proposal", () => {
   );
 
   assert.throws(() => buildConfirmResultProposalPatch({ resultProposalHomeScore: "", resultProposalAwayScore: "" }), /missing score/);
+});
+
+test("builds AI odds proposal prompt for admin confirmation", () => {
+  const prompt = buildAiOddsProposalPrompt({
+    matchId: "DRY-C1-FINAL-2026",
+    homeTeam: "Paris Saint-Germain",
+    awayTeam: "Arsenal",
+    kickoffUtc: "2026-05-30T16:00:00.000Z",
+  });
+
+  assert.match(prompt, /1-2 nguồn public/);
+  assert.match(prompt, /Asian handicap/);
+  assert.match(prompt, /JSON/);
+  assert.match(prompt, /không bịa/i);
+  assert.match(prompt, /admin confirm/);
+  assert.match(prompt, /DRY-C1-FINAL-2026/);
+});
+
+test("normalizes and formats AI odds proposal for admin verification", () => {
+  const match = {
+    matchId: "DRY-C1-FINAL-2026",
+    homeTeam: "Paris Saint-Germain",
+    awayTeam: "Arsenal",
+    kickoffUtc: "2026-05-30T16:00:00.000Z",
+  };
+  const proposal = normalizeAiOddsProposal({
+    favoriteSide: "home",
+    handicapGoals: "0.5",
+    summary: "PSG chấp nửa trái theo odds market",
+    sources: ["https://example.com/odds", "bad-url"],
+  });
+
+  assert.deepEqual(proposal, {
+    favoriteSide: SELECTIONS.HOME,
+    handicapGoals: 0.5,
+    summary: "PSG chấp nửa trái theo odds market",
+    sources: ["https://example.com/odds"],
+  });
+
+  const message = formatAdminOddsProposal(match, proposal);
+
+  assert.match(message, /Đề xuất kèo AI\/search/);
+  assert.match(message, /Paris Saint-Germain chấp Arsenal 0.5 Trái/);
+  assert.match(message, /https:\/\/example\.com\/odds/);
+  assert.match(message, /bấm Y để ghi kèo và mở pick/);
+});
+
+test("builds odds proposal patch, confirm keyboard, and confirmed odds patch", () => {
+  const proposal = {
+    favoriteSide: SELECTIONS.HOME,
+    handicapGoals: 0.5,
+    summary: "PSG chấp nửa trái",
+    sources: ["https://example.com/odds"],
+  };
+
+  assert.deepEqual(buildOddsProposalPatch(proposal, date("2026-05-30T10:00:00.000Z")), {
+    oddsProposalFavoriteSide: SELECTIONS.HOME,
+    oddsProposalHandicapGoals: 0.5,
+    oddsProposalSummary: "PSG chấp nửa trái",
+    oddsProposalSources: "https://example.com/odds",
+    oddsProposalAt: "2026-05-30T10:00:00.000Z",
+    oddsProposalDecision: "",
+    oddsProposalDecidedAt: "",
+  });
+
+  assert.deepEqual(buildOddsProposalConfirmKeyboard("DRY-C1-FINAL-2026", proposal), {
+    inline_keyboard: [
+      [
+        { text: "Y - Confirm & open", callback_data: "odds_confirm|DRY-C1-FINAL-2026|" },
+        { text: "N - Reject", callback_data: "odds_reject|DRY-C1-FINAL-2026|" },
+      ],
+    ],
+  });
+
+  assert.deepEqual(
+    buildConfirmOddsProposalPatch(
+      {
+        oddsProposalFavoriteSide: SELECTIONS.HOME,
+        oddsProposalHandicapGoals: "0.5",
+      },
+      date("2026-05-30T10:05:00.000Z")
+    ),
+    {
+      favoriteSide: SELECTIONS.HOME,
+      handicapSide: SELECTIONS.HOME,
+      handicapGoals: 0.5,
+      oddsLockedAt: "2026-05-30T10:05:00.000Z",
+      oddsProposalDecision: "CONFIRMED",
+      oddsProposalDecidedAt: "2026-05-30T10:05:00.000Z",
+    }
+  );
+});
+
+test("builds synthetic dry-run odds proposal", () => {
+  const proposal = buildDryRunOddsProposal({
+    matchId: "DRY-C1-FINAL-2026",
+    homeTeam: "Paris Saint-Germain",
+    awayTeam: "Arsenal",
+  });
+
+  assert.equal(proposal.favoriteSide, SELECTIONS.HOME);
+  assert.equal(proposal.handicapGoals, 0.5);
+  assert.match(proposal.summary, /Kèo mô phỏng/);
+  assert.deepEqual(proposal.sources, []);
 });
 
 test("derives stable Telegram update dedupe keys", () => {

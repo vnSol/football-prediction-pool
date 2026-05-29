@@ -193,6 +193,11 @@ function handleCallbackQuery(callbackQuery) {
     return;
   }
 
+  if (data.action === "odds_confirm" || data.action === "odds_reject") {
+    handleOddsProposalCallback(callbackQuery, data, admin);
+    return;
+  }
+
   var player = getPlayerByTelegramId(telegramUserId);
   if (!player || player.active === false || String(player.active).toLowerCase() === "false") {
     answerCallbackQuery(callbackQuery.id, "Bạn chưa có trong danh sách người chơi.");
@@ -235,6 +240,58 @@ function handleCallbackQuery(callbackQuery) {
 
 function adminResetSheet(chatId) {
   sendTelegramMessage(chatId, "Chọn sheet cần reset. Bot sẽ hỏi xác nhận trước khi xóa dữ liệu.", buildResetSheetKeyboard(getSheetNames()));
+}
+
+function handleOddsProposalCallback(callbackQuery, data, admin) {
+  var chatId = callbackQuery.message.chat.id;
+  var actor = callbackQuery.from.id;
+  if (!admin) {
+    answerCallbackQuery(callbackQuery.id, "Chỉ admin được confirm kèo.");
+    return;
+  }
+
+  var match = getMatchById(data.matchId);
+  if (!match) {
+    answerCallbackQuery(callbackQuery.id, "Không tìm thấy trận.");
+    return;
+  }
+
+  if (data.action === "odds_reject") {
+    updateMatch(
+      match.matchId,
+      {
+        oddsProposalDecision: "REJECTED",
+        oddsProposalDecidedAt: new Date().toISOString(),
+      },
+      actor,
+      "REJECT_ODDS_PROPOSAL"
+    );
+    answerCallbackQuery(callbackQuery.id, "Đã reject đề xuất kèo.");
+    sendTelegramMessage(chatId, "Đã reject đề xuất kèo cho " + match.matchId + ". Nếu cần, nhập tay bằng /set_odds " + match.matchId + " <HOME|AWAY> <handicap>.");
+    return;
+  }
+
+  var now = new Date();
+  if (!canSetOdds(match, now)) {
+    answerCallbackQuery(callbackQuery.id, "Trận đã khóa hoặc đã bắt đầu.");
+    sendTelegramMessage(chatId, "Không confirm được kèo cho " + match.matchId + " vì trận đã khóa hoặc đã bắt đầu.");
+    return;
+  }
+
+  try {
+    updateMatch(match.matchId, buildConfirmOddsProposalPatch(match, now), actor, "CONFIRM_ODDS_PROPOSAL");
+    var updatedMatch = getMatchById(match.matchId);
+    answerCallbackQuery(callbackQuery.id, "Đã confirm kèo.");
+    if (shouldAutoOpenAfterOdds(updatedMatch, now)) {
+      openMatch(match.matchId, actor, chatId);
+      return;
+    }
+    sendTelegramMessage(chatId, "Đã ghi kèo cho " + match.matchId + ": " + formatHandicap(updatedMatch) + ".");
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    answerCallbackQuery(callbackQuery.id, "Không confirm được đề xuất kèo.");
+    sendTelegramMessage(chatId, "Không confirm được đề xuất kèo cho " + match.matchId + ". Hãy nhập tay bằng /set_odds " + match.matchId + " <HOME|AWAY> <handicap>.");
+  }
 }
 
 function handleResultProposalCallback(callbackQuery, data, admin) {
@@ -494,8 +551,21 @@ function openMatch(matchId, actor, replyChatId) {
 
 function alertMissingOdds(match) {
   if (match.oddsAlertedAt) return;
-  updateMatch(match.matchId, { oddsAlertedAt: new Date().toISOString() }, "scheduler", "ODDS_ALERT");
-  sendToAdmins("⚠️ Còn dưới 6h tới " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " nhưng chưa có kèo. Dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.");
+  var now = new Date();
+  try {
+    var proposal = isDryRunMatch(match) ? buildDryRunOddsProposal(match) : generateAiOddsProposal(match);
+    updateMatch(
+      match.matchId,
+      Object.assign({ oddsAlertedAt: now.toISOString() }, buildOddsProposalPatch(proposal, now)),
+      "scheduler",
+      "ODDS_PROPOSAL"
+    );
+    sendToAdmins(formatAdminOddsProposal(match, proposal), buildOddsProposalConfirmKeyboard(match.matchId, proposal));
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    updateMatch(match.matchId, { oddsAlertedAt: now.toISOString() }, "scheduler", "ODDS_ALERT");
+    sendToAdmins("⚠️ Còn dưới 6h tới " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " nhưng chưa có kèo. Dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.");
+  }
 }
 
 function remindMissing(match) {
