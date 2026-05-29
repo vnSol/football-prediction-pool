@@ -61,7 +61,7 @@ function sendOddsUpdateMessage(match, previousHandicap) {
   sendToPlayers(getActivePlayers(), text, buildPickKeyboard(match));
 }
 
-function sendMissingPickReminders(match) {
+function sendMissingPickReminders(match, reminderMinutes) {
   var pickedIds = {};
   getPicks()
     .filter(function (pick) {
@@ -75,7 +75,7 @@ function sendMissingPickReminders(match) {
     if (!pickedIds[String(player.telegramUserId)]) {
       sendTelegramMessage(
         player.telegramUserId,
-        "⏰ Còn khoảng 30 phút: " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Chưa pick thì hệ thống sẽ auto chọn đội kèo trên lúc bóng lăn.",
+        formatMissingPickReminderMessage(match, reminderMinutes),
         buildPickKeyboard(match)
       );
     }

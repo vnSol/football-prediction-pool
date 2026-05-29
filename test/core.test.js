@@ -22,6 +22,7 @@ const {
   formatOpenMatchMessage,
   formatRecap,
   formatMyUpcomingPicks,
+  formatMissingPickReminderMessage,
   formatJoinAdminMessage,
   formatJoinMessage,
   formatTelegramDisplayName,
@@ -158,31 +159,37 @@ test("creates default picks for active players who missed kickoff", () => {
   ]);
 });
 
-test("scheduler prompts for odds instead of opening when odds are missing", () => {
+test("scheduler opens picks at T-24, prompts missing odds, and sends missing-pick reminders", () => {
   const now = date("2026-06-12T13:00:00.000Z");
   const matches = [
     {
       matchId: "OPEN-ME",
       status: STATUSES.SCHEDULED,
-      kickoffUtc: "2026-06-12T19:00:00.000Z",
+      kickoffUtc: "2026-06-13T12:30:00.000Z",
       handicapGoals: -0.5,
       favoriteSide: SELECTIONS.HOME,
     },
     {
       matchId: "NEEDS-ODDS",
       status: STATUSES.SCHEDULED,
-      kickoffUtc: "2026-06-12T18:30:00.000Z",
+      kickoffUtc: "2026-06-13T12:45:00.000Z",
     },
     {
       matchId: "ODDS-PROMPTED",
       status: STATUSES.SCHEDULED,
-      kickoffUtc: "2026-06-12T18:45:00.000Z",
+      kickoffUtc: "2026-06-13T12:45:00.000Z",
       oddsAlertedAt: "2026-06-12T12:30:00.000Z",
     },
     {
-      matchId: "REMIND-ME",
+      matchId: "REMIND-2H",
+      status: STATUSES.OPEN,
+      kickoffUtc: "2026-06-12T15:00:00.000Z",
+    },
+    {
+      matchId: "REMIND-30M",
       status: STATUSES.OPEN,
       kickoffUtc: "2026-06-12T13:30:00.000Z",
+      reminded120At: "2026-06-12T12:00:00.000Z",
     },
     {
       matchId: "LOCK-ME",
@@ -200,11 +207,12 @@ test("scheduler prompts for odds instead of opening when odds are missing", () =
   const actions = getSchedulerActions(matches, [], now);
 
   assert.deepEqual(
-    actions.map((action) => [action.type, action.matchId]),
+    actions.map((action) => [action.type, action.matchId, action.reminderMinutes].filter((value) => value !== undefined)),
     [
       [ACTIONS.OPEN_PICK, "OPEN-ME"],
       [ACTIONS.ODDS_ALERT, "NEEDS-ODDS"],
-      [ACTIONS.REMIND_MISSING, "REMIND-ME"],
+      [ACTIONS.REMIND_MISSING, "REMIND-2H", 120],
+      [ACTIONS.REMIND_MISSING, "REMIND-30M", 30],
       [ACTIONS.LOCK_MATCH, "LOCK-ME"],
       [ACTIONS.PROMPT_RESULT, "RESULT-ME"],
     ]
@@ -252,6 +260,7 @@ test("builds dry-run refresh patch that clears prior run state", () => {
       oddsProposalDecision: "",
       oddsProposalDecidedAt: "",
       openedAt: "",
+      reminded120At: "",
       reminded30At: "",
       lockedAt: "",
       adminResultPromptedAt: "",
@@ -299,7 +308,7 @@ test("creates home default picks when odds are still missing at lock", () => {
   ]);
 });
 
-test("auto-opens a scheduled match after odds are set inside the T-6h window", () => {
+test("auto-opens a scheduled match after odds are set inside the T-24 window", () => {
   const now = date("2026-06-12T13:00:00.000Z");
 
   assert.equal(
@@ -307,7 +316,7 @@ test("auto-opens a scheduled match after odds are set inside the T-6h window", (
       {
         matchId: "G1003",
         status: STATUSES.SCHEDULED,
-        kickoffUtc: "2026-06-12T18:30:00.000Z",
+        kickoffUtc: "2026-06-13T12:30:00.000Z",
         favoriteSide: SELECTIONS.HOME,
         handicapGoals: 0.5,
       },
@@ -321,7 +330,7 @@ test("auto-opens a scheduled match after odds are set inside the T-6h window", (
       {
         matchId: "FUTURE",
         status: STATUSES.SCHEDULED,
-        kickoffUtc: "2026-06-12T19:30:01.000Z",
+        kickoffUtc: "2026-06-13T13:00:01.000Z",
         favoriteSide: SELECTIONS.HOME,
         handicapGoals: 0.5,
       },
@@ -441,7 +450,7 @@ test("formats known team names with flags and leaves unknown names unchanged", (
   assert.equal(teamFlagEmoji("USA"), "🇺🇸");
 });
 
-test("formats all picks in the next six hours for a player", () => {
+test("formats all picks in the next 24 hours for a player", () => {
   assert.equal(
     formatMyUpcomingPicks({
       now: date("2026-06-12T00:00:00.000Z"),
@@ -473,17 +482,33 @@ test("formats all picks in the next six hours for a player", () => {
       ],
       picks: [
         { matchId: "M1", selection: SELECTIONS.HOME, star: true },
+        { matchId: "M2", selection: SELECTIONS.AWAY, star: false },
         { matchId: "OLD", selection: SELECTIONS.AWAY, star: false },
       ],
     }),
     [
-      "📌 Pick các trận trong 6 giờ tới",
+      "📌 Pick các trận trong 24 giờ tới",
       "M1: 🇦🇷 Argentina vs 🇩🇪 Germany",
       "Giờ đá: 2026-06-12 12:30 GMT+7",
       "Kèo: 🇦🇷 Argentina chấp 🇩🇪 Germany 0.5 Trái",
       "Pick: 🇦🇷 Argentina ⭐",
+      "",
+      "M2: 🇧🇷 Brazil vs 🇯🇵 Japan",
+      "Giờ đá: 2026-06-12 14:00 GMT+7",
+      "Kèo: 🇯🇵 Japan chấp 🇧🇷 Brazil 1 Trái",
+      "Pick: 🇯🇵 Japan",
     ].join("\n")
   );
+});
+
+test("formats missing-pick reminder by reminder threshold", () => {
+  const match = {
+    homeTeam: "Argentina",
+    awayTeam: "Germany",
+  };
+
+  assert.match(formatMissingPickReminderMessage(match, 120), /Còn dưới 2 giờ/);
+  assert.match(formatMissingPickReminderMessage(match, 30), /Còn dưới 30 phút/);
 });
 
 test("formats handicap as positive odds with favorite first", () => {

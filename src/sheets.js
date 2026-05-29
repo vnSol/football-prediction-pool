@@ -45,6 +45,7 @@ SHEET_HEADERS[SHEETS.MATCHES] = [
   "oddsProposalAt",
   "oddsProposalDecision",
   "oddsProposalDecidedAt",
+  "reminded120At",
 ];
 SHEET_HEADERS[SHEETS.PICKS] = [
   "matchId",

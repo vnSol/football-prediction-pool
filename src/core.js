@@ -26,6 +26,10 @@ var SOURCE = Object.freeze({
   ADMIN: "admin",
 });
 
+var PICK_OPEN_WINDOW_MINUTES = 24 * 60;
+var MISSING_PICK_REMINDER_2H_MINUTES = 120;
+var MISSING_PICK_REMINDER_30M_MINUTES = 30;
+
 function toDate(value) {
   return value instanceof Date ? value : new Date(value);
 }
@@ -240,6 +244,7 @@ function buildDryRunMatchRefreshPatch(match) {
     oddsProposalDecision: "",
     oddsProposalDecidedAt: "",
     openedAt: "",
+    reminded120At: "",
     reminded30At: "",
     lockedAt: "",
     adminResultPromptedAt: "",
@@ -291,7 +296,7 @@ function canChangePick(match, now) {
 function shouldAutoOpenAfterOdds(match, now) {
   if (!match || match.status !== STATUSES.SCHEDULED || !hasLockedOdds(match)) return false;
   var minutes = minutesUntil(match, now);
-  return minutes > 0 && minutes <= 360;
+  return minutes > 0 && minutes <= PICK_OPEN_WINDOW_MINUTES;
 }
 
 function getHandicapOutcome(match, score) {
@@ -362,9 +367,8 @@ function getSchedulerActions(matches, picks, now) {
     if (match.status === STATUSES.CANCELLED || match.status === STATUSES.SETTLED) return;
 
     var untilMinutes = minutesUntil(match, now);
-    var untilHours = hoursUntil(match, now);
 
-    if (match.status === STATUSES.SCHEDULED && untilHours <= 6 && untilMinutes > 0) {
+    if (match.status === STATUSES.SCHEDULED && untilMinutes <= PICK_OPEN_WINDOW_MINUTES && untilMinutes > 0) {
       if (!hasLockedOdds(match)) {
         if (!match.oddsAlertedAt) {
           actions.push({
@@ -389,10 +393,25 @@ function getSchedulerActions(matches, picks, now) {
       return;
     }
 
-    if (match.status === STATUSES.OPEN && untilMinutes <= 30 && untilMinutes > 0 && !match.reminded30At) {
+    if (match.status === STATUSES.OPEN && untilMinutes <= MISSING_PICK_REMINDER_30M_MINUTES && untilMinutes > 0 && !match.reminded30At) {
       actions.push({
         type: ACTIONS.REMIND_MISSING,
         matchId: match.matchId,
+        reminderMinutes: MISSING_PICK_REMINDER_30M_MINUTES,
+      });
+      return;
+    }
+
+    if (
+      match.status === STATUSES.OPEN &&
+      untilMinutes <= MISSING_PICK_REMINDER_2H_MINUTES &&
+      untilMinutes > MISSING_PICK_REMINDER_30M_MINUTES &&
+      !match.reminded120At
+    ) {
+      actions.push({
+        type: ACTIONS.REMIND_MISSING,
+        matchId: match.matchId,
+        reminderMinutes: MISSING_PICK_REMINDER_2H_MINUTES,
       });
       return;
     }
@@ -441,7 +460,7 @@ function formatCommands(isAdmin) {
     "/join - Tham gia pool và tự kích hoạt tài khoản",
     "/commands - Xem danh sách lệnh",
     "/matches - Xem các trận đang mở pick",
-    "/mypick - Xem pick của bạn trong 6 giờ tới",
+    "/mypick - Xem pick của bạn trong 24 giờ tới",
     "/mypick <matchId> - Xem pick của một trận",
     "/leaderboard - Xem bảng xếp hạng",
   ];
@@ -504,16 +523,16 @@ function formatMyUpcomingPicks(input) {
   var upcoming = (input.matches || [])
     .filter(function (match) {
       var minutes = minutesUntil(match, now);
-      return minutes > 0 && minutes <= 360;
+      return minutes > 0 && minutes <= PICK_OPEN_WINDOW_MINUTES;
     })
     .sort(function (a, b) {
       return toDate(a.kickoffUtc).getTime() - toDate(b.kickoffUtc).getTime();
     });
 
-  if (upcoming.length === 0) return "Không có trận nào trong 6 giờ tới.";
+  if (upcoming.length === 0) return "Không có trận nào trong 24 giờ tới.";
 
   return (
-    "📌 Pick các trận trong 6 giờ tới\n" +
+    "📌 Pick các trận trong 24 giờ tới\n" +
     upcoming
       .map(function (match) {
         var pick = picksByMatchId[String(match.matchId)];
@@ -525,6 +544,19 @@ function formatMyUpcomingPicks(input) {
         ].join("\n");
       })
       .join("\n\n")
+  );
+}
+
+function formatMissingPickReminderMessage(match, reminderMinutes) {
+  var label = Number(reminderMinutes) <= MISSING_PICK_REMINDER_30M_MINUTES ? "Còn dưới 30 phút" : "Còn dưới 2 giờ";
+  return (
+    "⏰ " +
+    label +
+    ": " +
+    sideDisplayName(match, SELECTIONS.HOME) +
+    " vs " +
+    sideDisplayName(match, SELECTIONS.AWAY) +
+    ". Chưa pick thì hệ thống sẽ auto chọn đội kèo trên lúc bóng lăn."
   );
 }
 
@@ -776,7 +808,7 @@ function buildConfirmResultProposalPatch(match, now) {
 function buildAiOddsProposalPrompt(match) {
   return [
     "Bạn là trợ lý vận hành cho game dự đoán bóng đá nội bộ.",
-    "Trước T-6h, hãy dùng web search để đọc 1-2 nguồn public về Asian handicap/handicap line cho trận này và đề xuất kèo để admin confirm.",
+    "Trước T-24h, hãy dùng web search để đọc 1-2 nguồn public về Asian handicap/handicap line cho trận này và đề xuất kèo để admin confirm.",
     "Ưu tiên nguồn odds/handicap public có ghi rõ line chấp, ví dụ odds aggregator, bookmaker page public, preview có kèo châu Á, hoặc trang thống kê odds.",
     "Chỉ đề xuất khi nguồn public đủ rõ; nếu chưa rõ thì favoriteSide và handicapGoals là null.",
     "Không bịa kèo, nguồn hoặc diễn giải. Nếu nhiều nguồn lệch nhau, chọn line phổ biến nhất và ghi rõ trong summary.",
@@ -1325,6 +1357,7 @@ if (typeof module !== "undefined") {
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,
+    formatMissingPickReminderMessage: formatMissingPickReminderMessage,
     formatJoinAdminMessage: formatJoinAdminMessage,
     formatJoinMessage: formatJoinMessage,
     formatTelegramDisplayName: formatTelegramDisplayName,

@@ -74,7 +74,7 @@ function processSchedulerActions(now) {
     if (!match) return;
     if (action.type === ACTIONS.OPEN_PICK) openMatch(match.matchId, "scheduler");
     if (action.type === ACTIONS.ODDS_ALERT) alertMissingOdds(match);
-    if (action.type === ACTIONS.REMIND_MISSING) remindMissing(match);
+    if (action.type === ACTIONS.REMIND_MISSING) remindMissing(match, action.reminderMinutes);
     if (action.type === ACTIONS.LOCK_MATCH) lockMatch(match.matchId, "scheduler");
     if (action.type === ACTIONS.PROMPT_RESULT) promptResult(match);
   });
@@ -544,7 +544,7 @@ function adminSetOdds(chatId, actor, args) {
   );
   var updatedMatch = getMatchById(matchId);
   if (shouldAutoOpenAfterOdds(updatedMatch, now)) {
-    sendTelegramMessage(chatId, "Đã ghi kèo cho " + matchId + ": " + formatHandicap(updatedMatch) + ". Trận trong T-6h nên bot mở pick ngay.");
+    sendTelegramMessage(chatId, "Đã ghi kèo cho " + matchId + ": " + formatHandicap(updatedMatch) + ". Trận trong T-24h nên bot mở pick ngay.");
     openMatch(matchId, actor, chatId);
     return;
   }
@@ -587,13 +587,16 @@ function alertMissingOdds(match) {
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
     updateMatch(match.matchId, { oddsAlertedAt: now.toISOString() }, "scheduler", "ODDS_ALERT");
-    sendToAdmins("⚠️ Còn dưới 6h tới " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " nhưng chưa có kèo. Dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.");
+    sendToAdmins("⚠️ Còn dưới 24h tới " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " nhưng chưa có kèo. Dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.");
   }
 }
 
-function remindMissing(match) {
-  sendMissingPickReminders(match);
-  updateMatch(match.matchId, { reminded30At: new Date().toISOString() }, "scheduler", "REMIND_MISSING");
+function remindMissing(match, reminderMinutes) {
+  var field = Number(reminderMinutes) <= 30 ? "reminded30At" : "reminded120At";
+  var patch = {};
+  patch[field] = new Date().toISOString();
+  sendMissingPickReminders(match, reminderMinutes);
+  updateMatch(match.matchId, patch, "scheduler", "REMIND_MISSING");
 }
 
 function lockMatch(matchId, actor, replyChatId) {
