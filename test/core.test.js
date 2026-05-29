@@ -160,6 +160,35 @@ test("creates default picks for active players who missed kickoff", () => {
   ]);
 });
 
+test("creates home default picks when handicap is zero", () => {
+  const match = {
+    matchId: "M002-ZERO",
+    favoriteSide: SELECTIONS.AWAY,
+    handicapGoals: 0,
+  };
+
+  assert.deepEqual(createDefaultPicks(match, players, [], date("2026-06-12T19:00:00.000Z")), [
+    {
+      matchId: "M002-ZERO",
+      telegramUserId: "101",
+      selection: SELECTIONS.HOME,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+    {
+      matchId: "M002-ZERO",
+      telegramUserId: "102",
+      selection: SELECTIONS.HOME,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+  ]);
+});
+
 test("scheduler opens picks at T-24, prompts missing odds, and sends missing-pick reminders", () => {
   const now = date("2026-06-12T13:00:00.000Z");
   const matches = [

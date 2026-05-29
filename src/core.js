@@ -265,6 +265,7 @@ function buildDryRunMatchRefreshPatch(match) {
 }
 
 function getDefaultPickSelection(match) {
+  if (match && match.handicapGoals !== "" && match.handicapGoals != null && Number(match.handicapGoals) === 0) return SELECTIONS.HOME;
   return isValidSelection(match && match.favoriteSide) ? match.favoriteSide : SELECTIONS.HOME;
 }
 
