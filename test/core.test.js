@@ -23,6 +23,7 @@ const {
   formatRecap,
   formatMyUpcomingPicks,
   formatMissingPickReminderMessage,
+  formatRules,
   formatJoinAdminMessage,
   formatJoinMessage,
   formatTelegramDisplayName,
@@ -414,6 +415,7 @@ test("formats commands by account role", () => {
   var adminCommands = formatCommands(true);
 
   assert.match(playerCommands, /\/join/);
+  assert.match(playerCommands, /\/rules/);
   assert.match(playerCommands, /\/matches/);
   assert.match(playerCommands, /\/mypick/);
   assert.doesNotMatch(playerCommands, /\/set_odds/);
@@ -423,6 +425,20 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
   assert.match(adminCommands, /đề xuất kết quả/);
+});
+
+test("formats game rules for players", () => {
+  const rules = formatRules();
+
+  assert.match(rules, /Luật chơi/);
+  assert.match(rules, /\/join/);
+  assert.match(rules, /T-24h/);
+  assert.match(rules, /T-2h/);
+  assert.match(rules, /T-30m/);
+  assert.match(rules, /auto chọn đội kèo trên/);
+  assert.match(rules, /Ngôi sao hi vọng/);
+  assert.match(rules, /\+2/);
+  assert.match(rules, /-1/);
 });
 
 test("formats Telegram join display names and welcome message", () => {

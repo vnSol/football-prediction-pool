@@ -94,6 +94,7 @@ function handleMessage(message) {
     return;
   }
   if (command.name === "join") return joinPool(chatId, message.from);
+  if (command.name === "rules") return sendTelegramMessage(chatId, formatRules());
   if (command.name === "commands") return sendTelegramMessage(chatId, formatCommands(admin));
   if (command.name === "matches") return sendOpenMatches(chatId);
   if (command.name === "leaderboard") return sendTelegramMessage(chatId, formatLeaderboard(getLeaderboard(), 20));

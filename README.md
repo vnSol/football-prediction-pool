@@ -94,6 +94,7 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 
 - `/commands`: show available commands for the current account role.
 - `/join`: join the pool and activate the Telegram account for scoring.
+- `/rules`: show the full game rules again.
 - `/matches`: show open matches with each match's remaining time before kickoff.
 - `/mypick`: show picks, including missing picks, for matches in the next 24 hours.
 - `/mypick <matchId>`: show current pick for one match.

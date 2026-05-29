@@ -458,6 +458,7 @@ function formatCommands(isAdmin) {
     "",
     "Player:",
     "/join - Tham gia pool và tự kích hoạt tài khoản",
+    "/rules - Xem lại luật chơi",
     "/commands - Xem danh sách lệnh",
     "/matches - Xem các trận đang mở pick",
     "/mypick - Xem pick của bạn trong 24 giờ tới",
@@ -486,6 +487,40 @@ function formatCommands(isAdmin) {
   }
 
   return lines.join("\n");
+}
+
+function formatRules() {
+  return [
+    "📜 Luật chơi",
+    "",
+    "1. Tham gia",
+    "- Dùng /join để tham gia pool hoặc active lại tài khoản.",
+    "- Chỉ người chơi active=true mới nhận thông báo, được tính default pick và lên bảng điểm.",
+    "",
+    "2. Mở pick",
+    "- Bot mở pick ở T-24h nếu trận đã có kèo.",
+    "- Nếu thiếu kèo ở T-24h, bot gửi đề xuất kèo kèm nguồn public cho admin confirm.",
+    "- Người chơi có thể đổi pick đến trước giờ bóng lăn.",
+    "",
+    "3. Cách pick",
+    "- Chọn đội thắng kèo sau khi áp handicap.",
+    "- Nếu kèo là số nguyên như 0, 1, 2 thì có thêm lựa chọn Hòa.",
+    "- Nếu kèo là nửa/trái tư như 0.25, 0.5, 0.75 thì không có Hòa.",
+    "",
+    "4. Nhắc pick",
+    "- Bot nhắc người chưa pick ở T-2h và T-30m.",
+    "- Khi bóng lăn, ai chưa pick sẽ được auto chọn đội kèo trên.",
+    "",
+    "5. Tính điểm",
+    "- Pick đúng: +1 điểm.",
+    "- Pick sai: 0 điểm.",
+    "- Trận knockout có Ngôi sao hi vọng: đúng +2 điểm, sai -1 điểm.",
+    "- Ngôi sao hi vọng chỉ áp dụng cho trận knockout.",
+    "",
+    "6. Kết quả",
+    "- Sau T+120m, bot đề xuất tỉ số/kết quả kèm nguồn public cho admin confirm.",
+    "- Admin confirm thì bot tự settle điểm, cập nhật leaderboard và gửi recap.",
+  ].join("\n");
 }
 
 function formatTelegramDisplayName(user) {
@@ -1358,6 +1393,7 @@ if (typeof module !== "undefined") {
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,
     formatMissingPickReminderMessage: formatMissingPickReminderMessage,
+    formatRules: formatRules,
     formatJoinAdminMessage: formatJoinAdminMessage,
     formatJoinMessage: formatJoinMessage,
     formatTelegramDisplayName: formatTelegramDisplayName,
