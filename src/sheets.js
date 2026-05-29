@@ -30,6 +30,14 @@ SHEET_HEADERS[SHEETS.MATCHES] = [
   "finalSummary",
   "handicapOutcome",
   "settledAt",
+  "resultProposalStatus",
+  "resultProposalHomeScore",
+  "resultProposalAwayScore",
+  "resultProposalSummary",
+  "resultProposalSources",
+  "resultProposalAt",
+  "resultProposalDecision",
+  "resultProposalDecidedAt",
 ];
 SHEET_HEADERS[SHEETS.PICKS] = [
   "matchId",

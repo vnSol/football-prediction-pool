@@ -236,6 +236,14 @@ function buildDryRunMatchRefreshPatch(match) {
     reminded30At: "",
     lockedAt: "",
     adminResultPromptedAt: "",
+    resultProposalStatus: "",
+    resultProposalHomeScore: "",
+    resultProposalAwayScore: "",
+    resultProposalSummary: "",
+    resultProposalSources: "",
+    resultProposalAt: "",
+    resultProposalDecision: "",
+    resultProposalDecidedAt: "",
     finalHomeScore: "",
     finalAwayScore: "",
     finalSummary: "",
@@ -437,7 +445,7 @@ function formatCommands(isAdmin) {
       "/recap <matchId> - Gửi lại recap",
       "/reset_sheet - Reset dữ liệu sheet",
       "/dryrun [baseTimeUtc ISO UTC] - Tạo dữ liệu mô phỏng",
-      "/dryrun_finish - AI nhập kết quả và settle các trận mô phỏng",
+      "/dryrun_finish - Mô phỏng T+120 và gửi đề xuất kết quả để admin confirm",
     ]);
   }
 
@@ -659,9 +667,12 @@ function formatAdminResultProposal(match, proposal) {
   var sourceLines = normalized.sources.length
     ? normalized.sources.map(function (source) { return "- " + source; })
     : ["- Chưa có link public đủ rõ."];
-  var confirmLine = hasProposalScore(normalized)
-    ? "/result " + match.matchId + " " + normalized.homeScore + "-" + normalized.awayScore + " " + normalized.summary
-    : "Nếu nguồn đã rõ, nhập /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;>";
+  var actionLine = hasProposalScore(normalized)
+    ? "Bấm Y để ghi kết quả này và settle tự động."
+    : "Không có tỉ số đủ rõ để confirm; bấm N rồi nhập tay bằng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;>";
+  var instructionLine = hasProposalScore(normalized)
+    ? "Admin verify link nguồn rồi bấm Y để confirm và tự settle, hoặc N để bỏ qua."
+    : "Admin verify link nguồn; đề xuất chưa có tỉ số đủ rõ nên bấm N rồi nhập tay nếu cần.";
 
   return [
     "🔎 Đề xuất AI/search cho " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
@@ -671,10 +682,53 @@ function formatAdminResultProposal(match, proposal) {
     "Nguồn để verify:",
     sourceLines.join("\n"),
     "",
-    "Admin verify link nguồn rồi confirm:",
-    confirmLine,
-    "Sau đó dùng /settle " + match.matchId + ".",
+    instructionLine,
+    actionLine,
   ].join("\n");
+}
+
+function buildResultProposalPatch(proposal, now) {
+  var normalized = normalizeAiResultProposal(proposal || {});
+  return {
+    resultProposalStatus: normalized.status,
+    resultProposalHomeScore: normalized.homeScore == null ? "" : normalized.homeScore,
+    resultProposalAwayScore: normalized.awayScore == null ? "" : normalized.awayScore,
+    resultProposalSummary: normalized.summary,
+    resultProposalSources: normalized.sources.join("\n"),
+    resultProposalAt: toIso(now || new Date()),
+    resultProposalDecision: "",
+    resultProposalDecidedAt: "",
+  };
+}
+
+function buildResultProposalConfirmKeyboard(matchId, proposal) {
+  var normalized = normalizeAiResultProposal(proposal || {});
+  if (!hasProposalScore(normalized)) {
+    return {
+      inline_keyboard: [[{ text: "N - Reject", callback_data: "result_reject|" + matchId + "|" }]],
+    };
+  }
+  return {
+    inline_keyboard: [
+      [
+        { text: "Y - Confirm & settle", callback_data: "result_confirm|" + matchId + "|" },
+        { text: "N - Reject", callback_data: "result_reject|" + matchId + "|" },
+      ],
+    ],
+  };
+}
+
+function buildConfirmResultProposalPatch(match, now) {
+  var homeScore = normalizeProposalScore(match && match.resultProposalHomeScore);
+  var awayScore = normalizeProposalScore(match && match.resultProposalAwayScore);
+  if (homeScore == null || awayScore == null) throw new Error("Result proposal missing score");
+  return {
+    finalHomeScore: homeScore,
+    finalAwayScore: awayScore,
+    finalSummary: sanitizeProposalText(match && match.resultProposalSummary),
+    resultProposalDecision: "CONFIRMED",
+    resultProposalDecidedAt: toIso(now || new Date()),
+  };
 }
 
 function formatHandicap(match) {
@@ -937,6 +991,17 @@ function buildFallbackDryRunResult(match) {
   };
 }
 
+function buildDryRunResultProposal(match) {
+  var result = buildFallbackDryRunResult(match);
+  return {
+    status: "FINISHED",
+    homeScore: result.homeScore,
+    awayScore: result.awayScore,
+    summary: result.summary,
+    sources: [],
+  };
+}
+
 function shouldShowDrawOption(match) {
   return Number.isInteger(Math.abs(Number(match.handicapGoals || 0)));
 }
@@ -1055,6 +1120,10 @@ if (typeof module !== "undefined") {
     buildDryRunMatchRefreshPatch: buildDryRunMatchRefreshPatch,
     buildDryRunPrompt: buildDryRunPrompt,
     buildDryRunResultPrompt: buildDryRunResultPrompt,
+    buildDryRunResultProposal: buildDryRunResultProposal,
+    buildResultProposalConfirmKeyboard: buildResultProposalConfirmKeyboard,
+    buildResultProposalPatch: buildResultProposalPatch,
+    buildConfirmResultProposalPatch: buildConfirmResultProposalPatch,
     buildFallbackDryRunResult: buildFallbackDryRunResult,
     normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
     normalizeDryRunResult: normalizeDryRunResult,

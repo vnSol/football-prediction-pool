@@ -29,9 +29,9 @@ function answerCallbackQuery(callbackQueryId, text) {
   });
 }
 
-function sendToAdmins(text) {
+function sendToAdmins(text, replyMarkup) {
   getAdminChatIds().forEach(function (chatId) {
-    sendTelegramMessage(chatId, text);
+    sendTelegramMessage(chatId, text, replyMarkup);
   });
 }
 

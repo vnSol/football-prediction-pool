@@ -32,6 +32,10 @@ const {
   buildDryRunMatches,
   buildDryRunPrompt,
   buildDryRunResultPrompt,
+  buildDryRunResultProposal,
+  buildResultProposalConfirmKeyboard,
+  buildResultProposalPatch,
+  buildConfirmResultProposalPatch,
   normalizeDryRunMatchesForOrchestration,
   normalizeDryRunResult,
   normalizeAiResultProposal,
@@ -228,6 +232,14 @@ test("builds dry-run refresh patch that clears prior run state", () => {
       reminded30At: "",
       lockedAt: "",
       adminResultPromptedAt: "",
+      resultProposalStatus: "",
+      resultProposalHomeScore: "",
+      resultProposalAwayScore: "",
+      resultProposalSummary: "",
+      resultProposalSources: "",
+      resultProposalAt: "",
+      resultProposalDecision: "",
+      resultProposalDecidedAt: "",
       finalHomeScore: "",
       finalAwayScore: "",
       finalSummary: "",
@@ -377,6 +389,7 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/set_odds/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
+  assert.match(adminCommands, /đề xuất kết quả/);
 });
 
 test("formats known team names with flags and leaves unknown names unchanged", () => {
@@ -624,6 +637,20 @@ test("builds and normalizes AI dry-run result payloads", () => {
   assert.throws(() => normalizeDryRunResult({ homeScore: "x", awayScore: 1, summary: "bad" }), /invalid score/);
 });
 
+test("builds dry-run result proposal without writing final result", () => {
+  const proposal = buildDryRunResultProposal({
+    matchId: "DRY-A",
+    homeTeam: "Argentina",
+    awayTeam: "Germany",
+  });
+
+  assert.equal(proposal.status, "FINISHED");
+  assert.equal(typeof proposal.homeScore, "number");
+  assert.equal(typeof proposal.awayScore, "number");
+  assert.match(proposal.summary, /Trận đấu mô phỏng/);
+  assert.deepEqual(proposal.sources, []);
+});
+
 test("omits draw button when handicap is not a whole number", () => {
   const keyboard = buildPickKeyboard({
     matchId: "M001",
@@ -784,8 +811,61 @@ test("normalizes and formats AI result proposal for admin verification", () => {
   assert.match(message, /Argentina 2-1 Germany/);
   assert.match(message, /https:\/\/www\.fifa\.com\/match-centre\/m001/);
   assert.match(message, /https:\/\/www\.bbc\.com\/sport\/football\/m001/);
-  assert.match(message, /\/result M001 2-1 Argentina mở tỉ số; Germany gỡ; Argentina thắng cuối trận/);
-  assert.match(message, /Admin verify link nguồn rồi confirm/);
+  assert.match(message, /bấm Y để confirm và tự settle/);
+  assert.match(message, /Bấm Y để ghi kết quả này và settle tự động/);
+  assert.doesNotMatch(message, /\/result M001 2-1/);
+});
+
+test("builds result proposal patch and confirm keyboard", () => {
+  const proposal = {
+    status: "FINISHED",
+    homeScore: 2,
+    awayScore: 1,
+    summary: "Argentina thắng cuối trận",
+    sources: ["https://www.fifa.com/match-centre/m001"],
+  };
+
+  assert.deepEqual(buildResultProposalPatch(proposal, date("2026-06-12T22:00:00.000Z")), {
+    resultProposalStatus: "FINISHED",
+    resultProposalHomeScore: 2,
+    resultProposalAwayScore: 1,
+    resultProposalSummary: "Argentina thắng cuối trận",
+    resultProposalSources: "https://www.fifa.com/match-centre/m001",
+    resultProposalAt: "2026-06-12T22:00:00.000Z",
+    resultProposalDecision: "",
+    resultProposalDecidedAt: "",
+  });
+
+  assert.deepEqual(buildResultProposalConfirmKeyboard("M001", proposal), {
+    inline_keyboard: [
+      [
+        { text: "Y - Confirm & settle", callback_data: "result_confirm|M001|" },
+        { text: "N - Reject", callback_data: "result_reject|M001|" },
+      ],
+    ],
+  });
+});
+
+test("builds final result patch from confirmed proposal", () => {
+  assert.deepEqual(
+    buildConfirmResultProposalPatch(
+      {
+        resultProposalHomeScore: "2",
+        resultProposalAwayScore: 1,
+        resultProposalSummary: "Argentina thắng cuối trận",
+      },
+      date("2026-06-12T22:05:00.000Z")
+    ),
+    {
+      finalHomeScore: 2,
+      finalAwayScore: 1,
+      finalSummary: "Argentina thắng cuối trận",
+      resultProposalDecision: "CONFIRMED",
+      resultProposalDecidedAt: "2026-06-12T22:05:00.000Z",
+    }
+  );
+
+  assert.throws(() => buildConfirmResultProposalPatch({ resultProposalHomeScore: "", resultProposalAwayScore: "" }), /missing score/);
 });
 
 test("derives stable Telegram update dedupe keys", () => {

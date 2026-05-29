@@ -188,6 +188,11 @@ function handleCallbackQuery(callbackQuery) {
     return;
   }
 
+  if (data.action === "result_confirm" || data.action === "result_reject") {
+    handleResultProposalCallback(callbackQuery, data, admin);
+    return;
+  }
+
   var player = getPlayerByTelegramId(telegramUserId);
   if (!player || player.active === false || String(player.active).toLowerCase() === "false") {
     answerCallbackQuery(callbackQuery.id, "Bạn chưa có trong danh sách người chơi.");
@@ -230,6 +235,50 @@ function handleCallbackQuery(callbackQuery) {
 
 function adminResetSheet(chatId) {
   sendTelegramMessage(chatId, "Chọn sheet cần reset. Bot sẽ hỏi xác nhận trước khi xóa dữ liệu.", buildResetSheetKeyboard(getSheetNames()));
+}
+
+function handleResultProposalCallback(callbackQuery, data, admin) {
+  var chatId = callbackQuery.message.chat.id;
+  var actor = callbackQuery.from.id;
+  if (!admin) {
+    answerCallbackQuery(callbackQuery.id, "Chỉ admin được confirm kết quả.");
+    return;
+  }
+
+  var match = getMatchById(data.matchId);
+  if (!match) {
+    answerCallbackQuery(callbackQuery.id, "Không tìm thấy trận.");
+    return;
+  }
+  if (match.status === STATUSES.SETTLED) {
+    answerCallbackQuery(callbackQuery.id, "Trận đã settle rồi.");
+    return;
+  }
+
+  if (data.action === "result_reject") {
+    updateMatch(
+      match.matchId,
+      {
+        resultProposalDecision: "REJECTED",
+        resultProposalDecidedAt: new Date().toISOString(),
+      },
+      actor,
+      "REJECT_RESULT_PROPOSAL"
+    );
+    answerCallbackQuery(callbackQuery.id, "Đã reject đề xuất.");
+    sendTelegramMessage(chatId, "Đã reject đề xuất cho " + match.matchId + ". Nếu cần, nhập tay bằng /result " + match.matchId + " <home-away> <diễn biến>.");
+    return;
+  }
+
+  try {
+    updateMatch(match.matchId, buildConfirmResultProposalPatch(match), actor, "CONFIRM_RESULT_PROPOSAL");
+    answerCallbackQuery(callbackQuery.id, "Đã confirm, bot sẽ settle.");
+    settleMatch(match.matchId, actor, chatId);
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    answerCallbackQuery(callbackQuery.id, "Không confirm được đề xuất.");
+    sendTelegramMessage(chatId, "Không confirm được đề xuất cho " + match.matchId + ". Hãy nhập tay bằng /result " + match.matchId + " <home-away> <diễn biến>.");
+  }
 }
 
 function handleResetSheetCallback(callbackQuery, data, admin) {
@@ -285,6 +334,7 @@ function adminDryRun(chatId, actor, args) {
       "Refreshed existing: " + (result.refreshed.length ? result.refreshed.join(", ") : "none"),
       "Skipped existing: " + (result.skipped.length ? result.skipped.join(", ") : "none"),
       "Đã chạy scheduler một lượt; dùng /matches để xem các trận đã mở pick.",
+      "Dùng /dryrun_finish để mô phỏng T+120, rồi bấm Y/N trên đề xuất kết quả.",
     ].join("\n")
   );
 }
@@ -298,47 +348,25 @@ function adminDryRunFinish(chatId, actor) {
 
   var finishAt = getDryRunFinishTime(matches);
   matches.forEach(function (match) {
-    if (match.status !== STATUSES.LOCKED && hasLockedOdds(match)) {
+    if (match.status !== STATUSES.LOCKED) {
       lockMatch(match.matchId, actor);
     }
   });
 
-  var aiResults = 0;
-  var fallbackResults = 0;
-  var settled = [];
+  var proposed = [];
   var failed = [];
 
   getDryRunMatchesToFinish(getMatches()).forEach(function (match) {
     try {
-      if (match.finalHomeScore === "" || match.finalHomeScore == null || match.finalAwayScore === "" || match.finalAwayScore == null) {
-        var result;
-        try {
-          result = generateAiDryRunResult(match);
-          aiResults += 1;
-        } catch (error) {
-          console.error(error && error.stack ? error.stack : error);
-          result = buildFallbackDryRunResult(match);
-          fallbackResults += 1;
-        }
-        updateMatch(
-          match.matchId,
-          {
-            finalHomeScore: result.homeScore,
-            finalAwayScore: result.awayScore,
-            finalSummary: result.summary,
-          },
-          actor,
-          "DRYRUN_SET_RESULT"
-        );
-      }
-
-      settleMatch(match.matchId, actor);
-      var after = getMatchById(match.matchId);
-      if (after && after.status === STATUSES.SETTLED) {
-        settled.push(match.matchId);
-      } else {
-        failed.push(match.matchId);
-      }
+      var proposal = buildDryRunResultProposal(match);
+      updateMatch(
+        match.matchId,
+        Object.assign({ adminResultPromptedAt: finishAt.toISOString() }, buildResultProposalPatch(proposal, finishAt)),
+        actor,
+        "DRYRUN_PROMPT_RESULT"
+      );
+      sendTelegramMessage(chatId, formatAdminResultProposal(match, proposal), buildResultProposalConfirmKeyboard(match.matchId, proposal));
+      proposed.push(match.matchId);
     } catch (error) {
       console.error(error && error.stack ? error.stack : error);
       failed.push(match.matchId);
@@ -349,8 +377,8 @@ function adminDryRunFinish(chatId, actor) {
     chatId,
     [
       "Đã finish dry-run tại mốc " + finishAt.toISOString() + ".",
-      "AI results: " + aiResults + " | fallback: " + fallbackResults,
-      "Settled: " + (settled.length ? settled.join(", ") : "none"),
+      "Đã gửi đề xuất kết quả: " + (proposed.length ? proposed.join(", ") : "none"),
+      "Bấm Y trên đề xuất để bot tự ghi kết quả và settle, hoặc N để reject.",
       "Failed: " + (failed.length ? failed.join(", ") : "none"),
     ].join("\n")
   );
@@ -523,13 +551,17 @@ function buildFallbackLockMessage(match, picks) {
 function promptResult(match) {
   updateMatch(match.matchId, { adminResultPromptedAt: new Date().toISOString() }, "scheduler", "PROMPT_RESULT");
   var text;
+  var keyboard;
   try {
-    text = formatAdminResultProposal(match, generateAiResultProposal(match));
+    var proposal = generateAiResultProposal(match);
+    updateMatch(match.matchId, buildResultProposalPatch(proposal), "scheduler", "STORE_RESULT_PROPOSAL");
+    text = formatAdminResultProposal(match, proposal);
+    keyboard = buildResultProposalConfirmKeyboard(match.matchId, proposal);
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
     text = "🔎 Cần xác nhận kết quả " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Dùng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".";
   }
-  sendToAdmins(text);
+  sendToAdmins(text, keyboard);
 }
 
 function adminSetResult(chatId, actor, args) {

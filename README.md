@@ -120,7 +120,7 @@ Manual commands are fallback controls. Normal flow is handled by `runScheduler()
 The bot uses OpenAI for three automated messages:
 
 - After lock: a suspenseful betting summary based only on Sheet facts.
-- At T+120m after kickoff: an admin-only result proposal using web search over 1-2 public sources. The message includes match status, proposed score if available, source links, and a suggested `/result` command. Admin must verify the links and confirm manually.
+- At T+120m after kickoff: an admin-only result proposal using web search over 1-2 public sources. The message includes match status, proposed score if available, source links, and Y/N buttons. Admin verifies the links, taps Y to auto-write the result and settle, or taps N to reject.
 - After settle: a localized match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.
 
 If OpenAI is not configured or the API call fails, the bot falls back to deterministic template messages so operations continue.
@@ -160,9 +160,9 @@ Syntax:
 
 If omitted, the bot uses the current time when the command runs. The generated matches are scheduled relative to `baseTimeUtc`, with enough cases to test orchestration: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one scheduled match without odds to trigger the zero-handicap fallback.
 
-`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, upserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. Existing `DRY-` matches are refreshed with the new schedule, odds, status, and cleared result fields. If the AI call fails, the bot uses a deterministic fallback set. Use `/reset_sheet` when you want to clear old dry-run picks and score rows too.
+`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, upserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. Existing `DRY-` matches are refreshed with the new schedule, odds, status, admin result prompt marker, and cleared result fields. If the AI call fails, the bot uses a deterministic fallback set. Use `/reset_sheet` when you want to clear old dry-run picks and score rows too.
 
-Use `/dryrun_finish` to finish all unsettled `DRY-` matches immediately. The bot locks any dry-run match with odds, asks AI for synthetic final scores and match events, writes the result, and settles the matches. If the AI result call fails, it uses a deterministic fallback result for that match.
+Use `/dryrun_finish` to simulate the T+120 result-proposal step for all unsettled `DRY-` matches. The bot locks any unfinished dry-run match and sends synthetic result proposals with Y/N buttons to the admin chat. Tapping Y writes the proposed final score and auto-settles; tapping N rejects the proposal. Because dry-run matches are synthetic, these proposals do not include public source links; production T+120 prompts still use AI/web search over 1-2 public sources.
 
 ## Telegram Spam / Retry Recovery
 
