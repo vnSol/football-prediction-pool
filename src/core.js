@@ -29,6 +29,7 @@ var SOURCE = Object.freeze({
 var PICK_OPEN_WINDOW_MINUTES = 24 * 60;
 var MISSING_PICK_REMINDER_2H_MINUTES = 120;
 var MISSING_PICK_REMINDER_30M_MINUTES = 30;
+var ODDS_BOOKMAKERS = Object.freeze(["Bet365", "Unibet", "Bwin"]);
 
 function toDate(value) {
   return value instanceof Date ? value : new Date(value);
@@ -500,7 +501,9 @@ function formatRules() {
     "",
     "2. Mở pick",
     "- Bot mở pick ở T-24h nếu trận đã có kèo.",
-    "- Nếu thiếu kèo ở T-24h, bot gửi đề xuất kèo kèm nguồn public cho admin confirm.",
+    "- Nếu thiếu kèo ở T-24h, bot tổng hợp kèo từ Bet365, Unibet, Bwin và gửi admin confirm.",
+    "- Kèo đề xuất là trung bình cộng các nguồn có line; nguồn nào có link thì bot dẫn link nguồn đó.",
+    "- Nếu cả 3 nguồn đều chưa có kèo đủ rõ, admin xác nhận thủ công bằng /set_odds.",
     "- Người chơi có thể đổi pick đến trước giờ bóng lăn.",
     "",
     "3. Cách pick",
@@ -738,15 +741,16 @@ function normalizeProposalScore(value) {
   return score;
 }
 
-function normalizeProposalSources(sources) {
+function normalizeProposalSources(sources, limit) {
   if (!Array.isArray(sources)) return [];
   var urls = [];
+  var maxUrls = limit || 2;
   sources.forEach(function (source) {
     var url = typeof source === "string" ? source : source && source.url;
     url = String(url || "").trim();
     if (/^https?:\/\/\S+$/i.test(url) && urls.indexOf(url) === -1) urls.push(url);
   });
-  return urls.slice(0, 2);
+  return urls.slice(0, maxUrls);
 }
 
 function sanitizeProposalText(value) {
@@ -844,18 +848,21 @@ function buildConfirmResultProposalPatch(match, now) {
 function buildAiOddsProposalPrompt(match) {
   return [
     "Bạn là trợ lý vận hành cho game dự đoán bóng đá nội bộ.",
-    "Trước T-24h, hãy dùng web search để đọc 1-2 nguồn public về Asian handicap/handicap line cho trận này và đề xuất kèo để admin confirm.",
-    "Ưu tiên nguồn odds/handicap public có ghi rõ line chấp, ví dụ odds aggregator, bookmaker page public, preview có kèo châu Á, hoặc trang thống kê odds.",
-    "Chỉ đề xuất khi nguồn public đủ rõ; nếu chưa rõ thì favoriteSide và handicapGoals là null.",
-    "Không bịa kèo, nguồn hoặc diễn giải. Nếu nhiều nguồn lệch nhau, chọn line phổ biến nhất và ghi rõ trong summary.",
+    "Trước T-24h, hãy dùng web search để đọc Asian handicap/handicap line từ đúng 3 nguồn cố định: Bet365, Unibet, Bwin.",
+    "Không dùng nguồn khác để lấy kèo. Nguồn khác chỉ được bỏ qua, không được dùng để suy luận line.",
+    "Với từng bookmaker, nếu không có line public đủ rõ hoặc không truy cập được, để favoriteSide và handicapGoals là null và ghi note ngắn.",
+    "Bot sẽ tự tính kèo đề xuất bằng trung bình cộng các nguồn có line trong 3 nguồn cố định; nếu cả 3 đều không có thì admin confirm thủ công.",
+    "Không bịa kèo, nguồn hoặc diễn giải.",
     "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
     "",
     "Schema:",
-    '{ "favoriteSide": "HOME|AWAY|null", "handicapGoals": number|null, "summary": "ngắn gọn", "sources": ["https://...", "https://..."] }',
+    '{ "summary": "ngắn gọn", "bookmakerLines": [{ "bookmaker": "Bet365|Unibet|Bwin", "favoriteSide": "HOME|AWAY|null", "handicapGoals": number|null, "url": "https://... hoặc chuỗi rỗng", "note": "ngắn gọn nếu thiếu line" }] }',
     "",
     "Quy ước:",
-    "- favoriteSide là đội chấp theo line đề xuất.",
+    "- bookmakerLines phải có đủ 3 object theo thứ tự Bet365, Unibet, Bwin.",
+    "- favoriteSide là đội chấp theo line của bookmaker đó.",
     "- handicapGoals là số trái chấp không âm, ví dụ 0, 0.25, 0.5, 0.75, 1.",
+    "- url là link public trực tiếp tới nguồn bookmaker nếu có; nguồn nào có link thì dẫn link nguồn đó.",
     "",
     "Match facts:",
     "- matchId: " + match.matchId,
@@ -866,6 +873,22 @@ function buildAiOddsProposalPrompt(match) {
 }
 
 function normalizeAiOddsProposal(result) {
+  var rawBookmakerLines = result && (result.bookmakerLines || result.bookmakers || result.oddsSources);
+  if (Array.isArray(rawBookmakerLines)) {
+    var bookmakerLines = normalizeBookmakerLines(rawBookmakerLines);
+    var aggregate = buildAverageBookmakerOdds(bookmakerLines);
+    return {
+      favoriteSide: aggregate.favoriteSide,
+      handicapGoals: aggregate.handicapGoals,
+      summary: sanitizeProposalText(result && result.summary) || buildAverageBookmakerSummary(aggregate),
+      sources: bookmakerLines
+        .map(function (line) { return line.url; })
+        .filter(function (url, index, urls) { return url && urls.indexOf(url) === index; })
+        .slice(0, ODDS_BOOKMAKERS.length),
+      bookmakerLines: bookmakerLines,
+    };
+  }
+
   var favoriteSide = normalizeProposalSelection(result && result.favoriteSide);
   var handicapGoals = normalizeProposalHandicap(result && result.handicapGoals);
   if ((favoriteSide == null) !== (handicapGoals == null)) throw new Error("AI odds proposal has partial handicap");
@@ -875,6 +898,118 @@ function normalizeAiOddsProposal(result) {
     summary: sanitizeProposalText(result && result.summary) || "Chưa có kèo public đủ rõ.",
     sources: normalizeProposalSources(result && (result.sources || result.sourceUrls || result.links)),
   };
+}
+
+function normalizeBookmakerLines(lines) {
+  var byBookmaker = {};
+  lines.forEach(function (line) {
+    var bookmaker = normalizeBookmakerName(line && (line.bookmaker || line.name || line.source));
+    if (!bookmaker || byBookmaker[bookmaker]) return;
+    byBookmaker[bookmaker] = normalizeBookmakerLine(bookmaker, line);
+  });
+  return ODDS_BOOKMAKERS.map(function (bookmaker) {
+    return byBookmaker[bookmaker] || {
+      bookmaker: bookmaker,
+      favoriteSide: null,
+      handicapGoals: null,
+      url: "",
+      note: "Không có kèo public đủ rõ.",
+    };
+  });
+}
+
+function normalizeBookmakerName(value) {
+  var key = String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (key.indexOf("bet365") !== -1) return "Bet365";
+  if (key.indexOf("unibet") !== -1) return "Unibet";
+  if (key.indexOf("bwin") !== -1) return "Bwin";
+  return "";
+}
+
+function normalizeBookmakerLine(bookmaker, line) {
+  var url = normalizeProposalUrl(line && (line.url || line.sourceUrl || line.link));
+  var note = sanitizeProposalText(line && (line.note || line.summary || line.reason));
+  var favoriteSide = null;
+  var handicapGoals = null;
+
+  try {
+    favoriteSide = normalizeProposalSelection(line && line.favoriteSide);
+    handicapGoals = normalizeProposalHandicap(line && line.handicapGoals);
+  } catch (error) {
+    return {
+      bookmaker: bookmaker,
+      favoriteSide: null,
+      handicapGoals: null,
+      url: url,
+      note: note || "Line không hợp lệ.",
+    };
+  }
+
+  if ((favoriteSide == null) !== (handicapGoals == null)) {
+    return {
+      bookmaker: bookmaker,
+      favoriteSide: null,
+      handicapGoals: null,
+      url: url,
+      note: note || "Thiếu favoriteSide hoặc handicapGoals.",
+    };
+  }
+
+  if (!favoriteSide && handicapGoals == null) {
+    return {
+      bookmaker: bookmaker,
+      favoriteSide: null,
+      handicapGoals: null,
+      url: url,
+      note: note || "Không có kèo public đủ rõ.",
+    };
+  }
+
+  return {
+    bookmaker: bookmaker,
+    favoriteSide: favoriteSide,
+    handicapGoals: handicapGoals,
+    url: url,
+    note: "",
+  };
+}
+
+function normalizeProposalUrl(value) {
+  var url = String(value || "").trim();
+  return /^https?:\/\/\S+$/i.test(url) ? url : "";
+}
+
+function buildAverageBookmakerOdds(bookmakerLines) {
+  var validLines = bookmakerLines.filter(hasBookmakerOdds);
+  if (!validLines.length) {
+    return {
+      favoriteSide: null,
+      handicapGoals: null,
+      validSourceCount: 0,
+    };
+  }
+  var signedTotal = validLines.reduce(function (total, line) {
+    return total + (line.favoriteSide === SELECTIONS.HOME ? 1 : -1) * Number(line.handicapGoals);
+  }, 0);
+  var average = signedTotal / validLines.length;
+  var roundedAverage = Math.round(average * 4) / 4;
+  if (Math.abs(roundedAverage) === 0) roundedAverage = 0;
+  return {
+    favoriteSide: roundedAverage < 0 ? SELECTIONS.AWAY : SELECTIONS.HOME,
+    handicapGoals: Math.abs(roundedAverage),
+    validSourceCount: validLines.length,
+  };
+}
+
+function hasBookmakerOdds(line) {
+  return line && line.favoriteSide && line.handicapGoals != null;
+}
+
+function buildAverageBookmakerSummary(aggregate) {
+  if (!aggregate.validSourceCount) {
+    return "Cả 3 nguồn cố định chưa có kèo public đủ rõ; cần admin xác nhận thủ công.";
+  }
+  return "Tổng hợp trung bình cộng " + aggregate.validSourceCount + " nguồn có line từ Bet365, Unibet, Bwin.";
 }
 
 function normalizeProposalSelection(value) {
@@ -907,9 +1042,15 @@ function formatAdminOddsProposal(match, proposal) {
         handicapGoals: normalized.handicapGoals,
       })
     : "chưa có kèo đủ rõ";
-  var sourceLines = normalized.sources.length
-    ? normalized.sources.map(function (source) { return "- " + source; })
-    : ["- Chưa có link public đủ rõ."];
+  var hasBookmakerLines = Array.isArray(normalized.bookmakerLines);
+  var sourceLines = hasBookmakerLines
+    ? normalized.bookmakerLines.map(function (line) { return formatAdminBookmakerLine(match, line); })
+    : normalized.sources.length
+      ? normalized.sources.map(function (source) { return "- " + source; })
+      : ["- Chưa có link public đủ rõ."];
+  var aggregateLine = hasBookmakerLines
+    ? formatAverageBookmakerLine(normalized.bookmakerLines)
+    : "";
   var instructionLine = hasProposalOdds(normalized)
     ? "Admin verify link nguồn rồi bấm Y để ghi kèo và mở pick, hoặc N để reject."
     : "Admin verify link nguồn; đề xuất chưa có kèo đủ rõ nên bấm N rồi nhập tay nếu cần.";
@@ -920,13 +1061,35 @@ function formatAdminOddsProposal(match, proposal) {
   return [
     "⚖️ Đề xuất kèo AI/search cho " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
     "Kèo đề xuất: " + oddsText,
+    aggregateLine,
     "Tóm tắt: " + normalized.summary,
-    "Nguồn để verify:",
+    hasBookmakerLines ? "Nguồn cố định để verify:" : "Nguồn để verify:",
     sourceLines.join("\n"),
     "",
     instructionLine,
     actionLine,
-  ].join("\n");
+  ].filter(function (line) { return line !== ""; }).join("\n");
+}
+
+function formatAverageBookmakerLine(bookmakerLines) {
+  var count = bookmakerLines.filter(hasBookmakerOdds).length;
+  if (!count) return "Tổng hợp: cả 3 nguồn cố định chưa có line đủ rõ; cần admin xác nhận thủ công.";
+  return "Tổng hợp: trung bình cộng " + count + " nguồn có line.";
+}
+
+function formatAdminBookmakerLine(match, line) {
+  var oddsText = hasBookmakerOdds(line)
+    ? formatHandicap({
+        homeTeam: match.homeTeam,
+        awayTeam: match.awayTeam,
+        favoriteSide: line.favoriteSide,
+        handicapSide: line.favoriteSide,
+        handicapGoals: line.handicapGoals,
+      })
+    : "chưa có kèo đủ rõ";
+  var urlText = line.url ? " - " + line.url : "";
+  var noteText = line.note ? " (" + line.note + ")" : "";
+  return "- " + line.bookmaker + ": " + oddsText + urlText + noteText;
 }
 
 function buildOddsProposalPatch(proposal, now) {

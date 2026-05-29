@@ -462,6 +462,10 @@ test("formats game rules for players", () => {
   assert.match(rules, /Luật chơi/);
   assert.match(rules, /\/join/);
   assert.match(rules, /T-24h/);
+  assert.match(rules, /Bet365, Unibet, Bwin/);
+  assert.match(rules, /trung bình cộng/);
+  assert.match(rules, /cả 3 nguồn/);
+  assert.match(rules, /admin xác nhận thủ công/);
   assert.match(rules, /T-2h/);
   assert.match(rules, /T-30m/);
   assert.match(rules, /auto chọn đội kèo trên/);
@@ -988,7 +992,13 @@ test("builds AI odds proposal prompt for admin confirmation", () => {
     kickoffUtc: "2026-05-30T16:00:00.000Z",
   });
 
-  assert.match(prompt, /1-2 nguồn public/);
+  assert.match(prompt, /Bet365/);
+  assert.match(prompt, /Unibet/);
+  assert.match(prompt, /Bwin/);
+  assert.match(prompt, /3 nguồn cố định/);
+  assert.match(prompt, /Không dùng nguồn khác/);
+  assert.match(prompt, /trung bình cộng/i);
+  assert.match(prompt, /bookmakerLines/);
   assert.match(prompt, /Asian handicap/);
   assert.match(prompt, /JSON/);
   assert.match(prompt, /không bịa/i);
@@ -1004,25 +1014,61 @@ test("normalizes and formats AI odds proposal for admin verification", () => {
     kickoffUtc: "2026-05-30T16:00:00.000Z",
   };
   const proposal = normalizeAiOddsProposal({
-    favoriteSide: "home",
-    handicapGoals: "0.5",
-    summary: "PSG chấp nửa trái theo odds market",
-    sources: ["https://example.com/odds", "bad-url"],
+    summary: "PSG chấp theo trung bình market",
+    bookmakerLines: [
+      { bookmaker: "Bet365", favoriteSide: "home", handicapGoals: "0.5", url: "https://bet365.example/odds" },
+      { bookmaker: "Unibet", favoriteSide: "HOME", handicapGoals: "0.25", url: "https://unibet.example/odds" },
+      { bookmaker: "Bwin", favoriteSide: "home", handicapGoals: "0.5", url: "https://bwin.example/odds" },
+    ],
   });
 
   assert.deepEqual(proposal, {
     favoriteSide: SELECTIONS.HOME,
     handicapGoals: 0.5,
-    summary: "PSG chấp nửa trái theo odds market",
-    sources: ["https://example.com/odds"],
+    summary: "PSG chấp theo trung bình market",
+    sources: ["https://bet365.example/odds", "https://unibet.example/odds", "https://bwin.example/odds"],
+    bookmakerLines: [
+      { bookmaker: "Bet365", favoriteSide: SELECTIONS.HOME, handicapGoals: 0.5, url: "https://bet365.example/odds", note: "" },
+      { bookmaker: "Unibet", favoriteSide: SELECTIONS.HOME, handicapGoals: 0.25, url: "https://unibet.example/odds", note: "" },
+      { bookmaker: "Bwin", favoriteSide: SELECTIONS.HOME, handicapGoals: 0.5, url: "https://bwin.example/odds", note: "" },
+    ],
   });
 
   const message = formatAdminOddsProposal(match, proposal);
 
   assert.match(message, /Đề xuất kèo AI\/search/);
   assert.match(message, /Paris Saint-Germain chấp Arsenal 0.5 Trái/);
-  assert.match(message, /https:\/\/example\.com\/odds/);
+  assert.match(message, /Tổng hợp: trung bình cộng 3 nguồn có line/);
+  assert.match(message, /Bet365: Paris Saint-Germain chấp Arsenal 0.5 Trái - https:\/\/bet365\.example\/odds/);
+  assert.match(message, /Unibet: Paris Saint-Germain chấp Arsenal 0.25 Trái - https:\/\/unibet\.example\/odds/);
+  assert.match(message, /Bwin: Paris Saint-Germain chấp Arsenal 0.5 Trái - https:\/\/bwin\.example\/odds/);
   assert.match(message, /bấm Y để ghi kèo và mở pick/);
+});
+
+test("leaves odds unconfirmed when all fixed bookmaker sources are missing", () => {
+  const proposal = normalizeAiOddsProposal({
+    bookmakerLines: [
+      { bookmaker: "Bet365", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+      { bookmaker: "Unibet", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+      { bookmaker: "Bwin", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+    ],
+  });
+
+  assert.deepEqual(proposal, {
+    favoriteSide: null,
+    handicapGoals: null,
+    summary: "Cả 3 nguồn cố định chưa có kèo public đủ rõ; cần admin xác nhận thủ công.",
+    sources: [],
+    bookmakerLines: [
+      { bookmaker: "Bet365", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+      { bookmaker: "Unibet", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+      { bookmaker: "Bwin", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+    ],
+  });
+
+  assert.deepEqual(buildOddsProposalConfirmKeyboard("DRY-C1-FINAL-2026", proposal), {
+    inline_keyboard: [[{ text: "N - Reject", callback_data: "odds_reject|DRY-C1-FINAL-2026|" }]],
+  });
 });
 
 test("builds odds proposal patch, confirm keyboard, and confirmed odds patch", () => {

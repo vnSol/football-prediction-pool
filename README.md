@@ -4,7 +4,7 @@ Google Apps Script + Telegram Bot automation for an internal World Cup predictio
 
 ## What It Does
 
-- At T-24h, uses AI/web search to propose missing handicap odds for admin verification, then opens picks after admin confirms.
+- At T-24h, uses AI/web search to summarize missing handicap odds from Bet365, Unibet, and Bwin for admin verification, then opens picks after admin confirms.
 - Opens Telegram picks after odds are set.
 - Lets players change picks through Telegram until kickoff.
 - Lets players self-register in the private group with `/join`.
@@ -125,7 +125,7 @@ In a private group, players can use `/join` to add themselves to `Players` with 
 
 The bot uses OpenAI for four automated messages:
 
-- At T-24h before kickoff when odds are missing: an admin-only handicap proposal using web search over 1-2 public sources. The message includes proposed line, source links, and Y/N buttons. Admin taps Y to write odds and open picks, or taps N to reject and use `/set_odds`.
+- At T-24h before kickoff when odds are missing: an admin-only handicap proposal using web search over fixed Bet365, Unibet, and Bwin sources. The bot averages available lines from those three sources, links any source it found, and falls back to admin confirmation when all three are missing. Admin taps Y to write odds and open picks, or taps N to reject and use `/set_odds`.
 - After lock: a suspenseful betting summary based only on Sheet facts.
 - At T+120m after kickoff: an admin-only result proposal using web search over 1-2 public sources. The message includes match status, proposed score if available, source links, and Y/N buttons. Admin verifies the links, taps Y to auto-write the result and settle, or taps N to reject.
 - After settle: a localized match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.
