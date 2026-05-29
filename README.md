@@ -7,9 +7,9 @@ Google Apps Script + Telegram Bot automation for an internal World Cup predictio
 - At T-24h, uses AI/web search to summarize missing handicap odds from Bet365, Unibet, and Bwin for admin verification, then opens picks after admin confirms.
 - Opens Telegram picks after odds are set.
 - Lets players change picks through Telegram until kickoff.
-- Lets players self-register in the private group with `/join`.
+- Lets players self-register by messaging the bot directly with `/join`.
 - Sends T-2h and T-30m reminders to players who have not picked.
-- Locks at kickoff and defaults missing picks to the favorite side.
+- Locks at kickoff, defaults missing picks to the favorite side, and posts a group lock summary with every player's final pick.
 - At T+120m, uses AI/web search to propose score, match status, and public source links for admin verification.
 - Lets admins confirm final scores after checking the source links.
 - Settles points, updates Google Sheets, and sends a cheerful recap + leaderboard.
@@ -101,6 +101,8 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 - `/leaderboard`: show leaderboard.
 - Inline buttons: choose home/draw/away and toggle star for knockout matches.
 
+Use player commands and pick buttons in direct messages with the bot. The bot ignores `/join`, `/matches`, `/mypick`, `/commands`, and pick/star callbacks in group chats to avoid group spam.
+
 ## Admin Commands
 
 - `/add_player <telegramUserId> <display name>`
@@ -119,14 +121,14 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 
 Manual commands are fallback controls. Normal flow is handled by `runScheduler()`. If `/set_odds` is used for a scheduled match inside T-24h, the bot opens pick immediately.
 
-In a private group, players can use `/join` to add themselves to `Players` with `active=true`. The bot uses their Telegram profile name when available, then immediately replies with current open matches so late joiners can pick without waiting for another broadcast. Admins are notified when `/join` creates a new player or reactivates an inactive player.
+Players can direct-message `/join` to add themselves to `Players` with `active=true`. The bot uses their Telegram profile name when available, then immediately replies with current open matches so late joiners can pick without waiting for another broadcast. Admins are notified when `/join` creates a new player or reactivates an inactive player.
 
 ## AI Messages
 
 The bot uses OpenAI for four automated messages:
 
 - At T-24h before kickoff when odds are missing: an admin-only handicap proposal using web search over fixed Bet365, Unibet, and Bwin sources. The bot averages available lines from those three sources, links any source it found, and falls back to admin confirmation when all three are missing. Admin taps Y to write odds and open picks, or taps N to reject and use `/set_odds`.
-- After lock: a suspenseful betting summary based only on Sheet facts.
+- After lock: a suspenseful betting summary based only on Sheet facts, followed by a deterministic list of every player's final pick.
 - At T+120m after kickoff: an admin-only result proposal using web search over 1-2 public sources. The message includes match status, proposed score if available, source links, and Y/N buttons. Admin verifies the links, taps Y to auto-write the result and settle, or taps N to reject.
 - After settle: a localized match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.
 

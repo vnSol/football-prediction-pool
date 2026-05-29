@@ -30,6 +30,7 @@ var PICK_OPEN_WINDOW_MINUTES = 24 * 60;
 var MISSING_PICK_REMINDER_2H_MINUTES = 120;
 var MISSING_PICK_REMINDER_30M_MINUTES = 30;
 var ODDS_BOOKMAKERS = Object.freeze(["Bet365", "Unibet", "Bwin"]);
+var DIRECT_ONLY_PLAYER_COMMANDS = Object.freeze(["pick", "mypick", "matches", "join", "commands"]);
 
 function toDate(value) {
   return value instanceof Date ? value : new Date(value);
@@ -41,6 +42,24 @@ function toIso(value) {
 
 function isValidSelection(selection) {
   return selection === SELECTIONS.HOME || selection === SELECTIONS.DRAW || selection === SELECTIONS.AWAY;
+}
+
+function isPrivateTelegramChat(chat) {
+  return String((chat && chat.type) || "").toLowerCase() === "private";
+}
+
+function isDirectOnlyPlayerCommand(commandName) {
+  return DIRECT_ONLY_PLAYER_COMMANDS.indexOf(String(commandName || "").toLowerCase()) !== -1;
+}
+
+function shouldIgnoreDirectOnlyCommandInChat(commandName, chat) {
+  return isDirectOnlyPlayerCommand(commandName) && !isPrivateTelegramChat(chat);
+}
+
+function shouldHandlePickCallbackInChat(action, chat) {
+  var normalizedAction = String(action || "").toLowerCase();
+  if (normalizedAction !== "pick" && normalizedAction !== "star") return true;
+  return isPrivateTelegramChat(chat);
 }
 
 var TEAM_FLAG_CODES = Object.freeze({
@@ -496,7 +515,8 @@ function formatRules() {
     "📜 Luật chơi",
     "",
     "1. Tham gia",
-    "- Dùng /join để tham gia pool hoặc active lại tài khoản.",
+    "- Dùng /join trong direct message với bot để tham gia pool hoặc active lại tài khoản.",
+    "- Các lệnh /join, /matches, /mypick, /commands và nút pick chỉ dùng trong direct message; bot không trả lời trong group để tránh spam.",
     "- Chỉ người chơi active=true mới nhận thông báo, được tính default pick và lên bảng điểm.",
     "",
     "2. Mở pick",
@@ -514,6 +534,7 @@ function formatRules() {
     "4. Nhắc pick",
     "- Bot nhắc người chưa pick ở T-2h và T-30m.",
     "- Khi bóng lăn, ai chưa pick sẽ được auto chọn đội kèo trên.",
+    "- Khi khóa pick, bot gửi vào group phần Pick đã chốt để tổng hợp pick cuối cùng của mọi người chơi.",
     "",
     "5. Tính điểm",
     "- Pick đúng: +1 điểm.",
@@ -618,6 +639,34 @@ function buildLockedBettingFacts(input) {
     starPicks: picks.filter(function (pick) { return parseBoolean(pick.star); }).length,
     drawWasOpen: shouldShowDrawOption(match),
   };
+}
+
+function formatLockedPickSummary(match, picks) {
+  var lines = ["📋 Pick đã chốt"];
+  var groups = [
+    { selection: SELECTIONS.HOME, label: sideDisplayName(match, SELECTIONS.HOME) },
+    { selection: SELECTIONS.DRAW, label: "Hòa" },
+    { selection: SELECTIONS.AWAY, label: sideDisplayName(match, SELECTIONS.AWAY) },
+  ];
+  var hasPicks = false;
+
+  groups.forEach(function (group) {
+    var names = (picks || [])
+      .filter(function (pick) {
+        return pick.selection === group.selection;
+      })
+      .map(function (pick) {
+        var name = sanitizeProposalText(pick.displayName || pick.telegramUserId || "Người chơi");
+        return name + (parseBoolean(pick.star) ? " ⭐" : "");
+      });
+    if (names.length) {
+      hasPicks = true;
+      lines.push("- " + group.label + ": " + names.join(", "));
+    }
+  });
+
+  if (!hasPicks) lines.push("- Chưa có pick.");
+  return lines.join("\n");
 }
 
 function buildLockDramaPrompt(input) {
@@ -1531,6 +1580,7 @@ if (typeof module !== "undefined") {
     buildAiResultProposalPrompt: buildAiResultProposalPrompt,
     buildLockDramaPrompt: buildLockDramaPrompt,
     buildLockedBettingFacts: buildLockedBettingFacts,
+    formatLockedPickSummary: formatLockedPickSummary,
     createDefaultPicks: createDefaultPicks,
     buildDryRunMatches: buildDryRunMatches,
     buildDryRunMatchRefreshPatch: buildDryRunMatchRefreshPatch,
@@ -1569,6 +1619,7 @@ if (typeof module !== "undefined") {
     getHandicapOutcome: getHandicapOutcome,
     getSchedulerActions: getSchedulerActions,
     getTelegramUpdateDedupeKey: getTelegramUpdateDedupeKey,
+    isPrivateTelegramChat: isPrivateTelegramChat,
     buildResetSheetConfirmKeyboard: buildResetSheetConfirmKeyboard,
     buildResetSheetKeyboard: buildResetSheetKeyboard,
     hasLockedOdds: hasLockedOdds,
@@ -1581,6 +1632,8 @@ if (typeof module !== "undefined") {
     parseTelegramCommand: parseTelegramCommand,
     scorePick: scorePick,
     shouldAutoOpenAfterOdds: shouldAutoOpenAfterOdds,
+    shouldHandlePickCallbackInChat: shouldHandlePickCallbackInChat,
+    shouldIgnoreDirectOnlyCommandInChat: shouldIgnoreDirectOnlyCommandInChat,
     shouldNotifyOddsUpdate: shouldNotifyOddsUpdate,
     shouldShowDrawOption: shouldShowDrawOption,
     sideDisplayName: sideDisplayName,

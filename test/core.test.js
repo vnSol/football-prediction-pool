@@ -26,9 +26,11 @@ const {
   formatRules,
   formatJoinAdminMessage,
   formatJoinMessage,
+  formatLockedPickSummary,
   formatTelegramDisplayName,
   getSchedulerActions,
   getTelegramUpdateDedupeKey,
+  isPrivateTelegramChat,
   parseAddMatchArgs,
   parseAddPlayerArgs,
   buildAiRecapPrompt,
@@ -57,6 +59,8 @@ const {
   getDryRunMatchesToFinish,
   scorePick,
   shouldAutoOpenAfterOdds,
+  shouldHandlePickCallbackInChat,
+  shouldIgnoreDirectOnlyCommandInChat,
   shouldNotifyOddsUpdate,
   teamDisplayName,
   teamFlagEmoji,
@@ -456,11 +460,34 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /đề xuất kết quả/);
 });
 
+test("keeps player commands and pick callbacks private-only", () => {
+  const privateChat = { type: "private" };
+  const groupChat = { type: "supergroup" };
+
+  assert.equal(isPrivateTelegramChat(privateChat), true);
+  assert.equal(isPrivateTelegramChat(groupChat), false);
+
+  ["pick", "mypick", "matches", "join", "commands"].forEach((commandName) => {
+    assert.equal(shouldIgnoreDirectOnlyCommandInChat(commandName, groupChat), true);
+    assert.equal(shouldIgnoreDirectOnlyCommandInChat(commandName, privateChat), false);
+  });
+
+  assert.equal(shouldIgnoreDirectOnlyCommandInChat("rules", groupChat), false);
+  assert.equal(shouldIgnoreDirectOnlyCommandInChat("set_odds", groupChat), false);
+  assert.equal(shouldHandlePickCallbackInChat("pick", groupChat), false);
+  assert.equal(shouldHandlePickCallbackInChat("star", groupChat), false);
+  assert.equal(shouldHandlePickCallbackInChat("pick", privateChat), true);
+  assert.equal(shouldHandlePickCallbackInChat("odds_confirm", groupChat), true);
+});
+
 test("formats game rules for players", () => {
   const rules = formatRules();
 
   assert.match(rules, /Luật chơi/);
   assert.match(rules, /\/join/);
+  assert.match(rules, /direct message/);
+  assert.match(rules, /\/join, \/matches, \/mypick, \/commands/);
+  assert.match(rules, /không trả lời trong group/);
   assert.match(rules, /T-24h/);
   assert.match(rules, /Bet365, Unibet, Bwin/);
   assert.match(rules, /trung bình cộng/);
@@ -469,6 +496,8 @@ test("formats game rules for players", () => {
   assert.match(rules, /T-2h/);
   assert.match(rules, /T-30m/);
   assert.match(rules, /auto chọn đội kèo trên/);
+  assert.match(rules, /Pick đã chốt/);
+  assert.match(rules, /group/);
   assert.match(rules, /Ngôi sao hi vọng/);
   assert.match(rules, /\+2/);
   assert.match(rules, /-1/);
@@ -831,6 +860,32 @@ test("builds locked betting facts for AI lock message", () => {
       starPicks: 1,
       drawWasOpen: false,
     }
+  );
+});
+
+test("formats locked pick summary with every player pick", () => {
+  const summary = formatLockedPickSummary(
+    {
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      handicapGoals: 0,
+    },
+    [
+      { displayName: "An", selection: SELECTIONS.HOME, star: true },
+      { displayName: "Binh", selection: SELECTIONS.DRAW, star: false },
+      { displayName: "Chi", selection: SELECTIONS.AWAY, star: false },
+      { displayName: "Dung", selection: SELECTIONS.HOME, star: false },
+    ]
+  );
+
+  assert.equal(
+    summary,
+    [
+      "📋 Pick đã chốt",
+      "- 🇦🇷 Argentina: An ⭐, Dung",
+      "- Hòa: Binh",
+      "- 🇩🇪 Germany: Chi",
+    ].join("\n")
   );
 });
 

@@ -85,6 +85,7 @@ function handleMessage(message) {
   var text = message.text || "";
   var command = parseTelegramCommand(text);
   if (!command) return;
+  if (shouldIgnoreDirectOnlyCommandInChat(command.name, message.chat)) return;
 
   var player = getPlayerByTelegramId(message.from.id);
   var admin = isAdminChatId(chatId) || isAdminChatId(message.from.id);
@@ -219,6 +220,11 @@ function handleCallbackQuery(callbackQuery) {
 
   if (data.action === "odds_confirm" || data.action === "odds_reject") {
     handleOddsProposalCallback(callbackQuery, data, admin);
+    return;
+  }
+
+  if (!shouldHandlePickCallbackInChat(data.action, callbackQuery.message.chat)) {
+    answerCallbackQuery(callbackQuery.id, "Hãy pick trong direct message với bot để tránh spam group.");
     return;
   }
 
@@ -630,6 +636,7 @@ function sendLockMessage(matchId) {
     console.error(error && error.stack ? error.stack : error);
     text = buildFallbackLockMessage(match, picks);
   }
+  text = [text, formatLockedPickSummary(match, picks)].join("\n\n");
   sendRecapToConfiguredChats(text);
 }
 
