@@ -116,6 +116,7 @@ function handleMessage(message) {
   if (command.name === "dryrun_finish") return adminDryRunFinish(chatId, message.from.id);
   if (command.name === "open") return openMatch(command.args[0], message.from.id, chatId);
   if (command.name === "lock") return lockMatch(command.args[0], message.from.id, chatId);
+  if (command.name === "lock_summary") return resendLockSummary(command.args[0], chatId);
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
   if (command.name === "settle") return settleMatch(command.args[0], message.from.id, chatId);
   if (command.name === "recap") return resendRecap(command.args[0], chatId);
@@ -649,6 +650,10 @@ function lockMatch(matchId, actor, replyChatId) {
 }
 
 function sendLockMessage(matchId) {
+  return sendRecapToConfiguredChats(buildLockMessageText(matchId));
+}
+
+function buildLockMessageText(matchId) {
   var match = getMatchById(matchId);
   var picks = getPicks().filter(function (pick) {
     return String(pick.matchId) === String(matchId);
@@ -660,8 +665,25 @@ function sendLockMessage(matchId) {
     console.error(error && error.stack ? error.stack : error);
     text = buildFallbackLockMessage(match, picks);
   }
-  text = [text, formatLockedPickSummary(match, picks)].join("\n\n");
-  sendRecapToConfiguredChats(text);
+  return [text, formatLockedPickSummary(match, picks)].join("\n\n");
+}
+
+function resendLockSummary(matchId, chatId) {
+  var match = getMatchById(matchId);
+  if (!match) {
+    sendTelegramMessage(chatId, "Không tìm thấy trận. Cú pháp: /lock_summary <matchId>");
+    return;
+  }
+  if (!canSendLockSummary(match)) {
+    sendTelegramMessage(chatId, "Chỉ gửi lại pick đã chốt khi trận đã LOCKED hoặc SETTLED. Nếu cần khóa ngay, dùng /lock " + matchId + ".");
+    return;
+  }
+  var sentCount = sendLockMessage(matchId);
+  if (!sentCount) {
+    sendTelegramMessage(chatId, "Chưa gửi được AI pick đã chốt cho " + matchId + " vì chưa cấu hình RECAP_CHAT_ID.");
+    return;
+  }
+  sendTelegramMessage(chatId, "Đã gửi lại AI pick đã chốt cho " + matchId + " vào RECAP_CHAT_ID.");
 }
 
 function buildFallbackLockMessage(match, picks) {

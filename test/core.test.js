@@ -8,6 +8,7 @@ const {
   buildDefaultOddsPatch,
   buildDryRunMatchRefreshPatch,
   canChangePick,
+  canSendLockSummary,
   canSetOdds,
   createDefaultPicks,
   buildPickKeyboard,
@@ -255,6 +256,22 @@ test("scheduler opens picks at T-24, prompts missing odds, and sends missing-pic
   );
 });
 
+test("scheduler locks a scheduled match that missed the open window after kickoff", () => {
+  const actions = getSchedulerActions(
+    [
+      {
+        matchId: "MISSED-OPEN",
+        status: STATUSES.SCHEDULED,
+        kickoffUtc: "2026-06-12T12:59:59.000Z",
+      },
+    ],
+    [],
+    date("2026-06-12T13:00:00.000Z")
+  );
+
+  assert.deepEqual(actions, [{ type: ACTIONS.LOCK_MATCH, matchId: "MISSED-OPEN" }]);
+});
+
 test("uses home zero handicap as the default missing odds patch", () => {
   assert.deepEqual(buildDefaultOddsPatch(date("2026-06-12T13:00:00.000Z")), {
     favoriteSide: SELECTIONS.HOME,
@@ -457,9 +474,18 @@ test("formats commands by account role", () => {
 
   assert.match(adminCommands, /\/matches/);
   assert.match(adminCommands, /\/set_odds/);
+  assert.match(adminCommands, /\/lock_summary <matchId>/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
   assert.match(adminCommands, /đề xuất kết quả/);
+});
+
+test("allows resending lock summaries only after picks are final", () => {
+  assert.equal(canSendLockSummary({ status: STATUSES.LOCKED }), true);
+  assert.equal(canSendLockSummary({ status: STATUSES.SETTLED }), true);
+  assert.equal(canSendLockSummary({ status: STATUSES.OPEN }), false);
+  assert.equal(canSendLockSummary({ status: STATUSES.SCHEDULED }), false);
+  assert.equal(canSendLockSummary(null), false);
 });
 
 test("keeps player commands and pick callbacks private-only", () => {
@@ -938,6 +964,7 @@ test("formats locked pick summary with every player pick", () => {
       "- 🇩🇪 Germany: Chi",
     ].join("\n")
   );
+  assert.doesNotMatch(summary, /\bHOME\b|\bAWAY\b/);
 });
 
 test("builds AI prompts with facts-first constraints", () => {
@@ -958,6 +985,9 @@ test("builds AI prompts with facts-first constraints", () => {
   assert.match(lockPrompt, /không bịa/);
   assert.match(lockPrompt, /ly kì/);
   assert.match(lockPrompt, /Argentina vs Germany/);
+  assert.match(lockPrompt, /Pick Argentina: 2/);
+  assert.match(lockPrompt, /Pick Germany: 1/);
+  assert.doesNotMatch(lockPrompt, /\bHOME\b|\bAWAY\b/);
 
   const recapPrompt = buildAiRecapPrompt({
     match: {

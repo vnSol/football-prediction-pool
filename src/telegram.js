@@ -86,11 +86,12 @@ function sendRecapToConfiguredChats(text) {
   var chatIds = getRecapChatIds(getActivePlayers());
   if (chatIds.length === 0) {
     console.log("RECAP_CHAT_ID is not set; skipping recap broadcast.");
-    return;
+    return 0;
   }
   chatIds.forEach(function (chatId) {
     sendTelegramMessage(chatId, text);
   });
+  return chatIds.length;
 }
 
 function setTelegramWebhook(webAppUrl) {

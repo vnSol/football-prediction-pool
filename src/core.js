@@ -314,6 +314,10 @@ function canChangePick(match, now) {
   return toDate(now).getTime() < toDate(match.kickoffUtc).getTime();
 }
 
+function canSendLockSummary(match) {
+  return Boolean(match && (match.status === STATUSES.LOCKED || match.status === STATUSES.SETTLED));
+}
+
 function shouldAutoOpenAfterOdds(match, now) {
   if (!match || match.status !== STATUSES.SCHEDULED || !hasLockedOdds(match)) return false;
   var minutes = minutesUntil(match, now);
@@ -389,6 +393,14 @@ function getSchedulerActions(matches, picks, now) {
 
     var untilMinutes = minutesUntil(match, now);
 
+    if ((match.status === STATUSES.OPEN || match.status === STATUSES.SCHEDULED) && untilMinutes <= 0) {
+      actions.push({
+        type: ACTIONS.LOCK_MATCH,
+        matchId: match.matchId,
+      });
+      return;
+    }
+
     if (match.status === STATUSES.SCHEDULED && untilMinutes <= PICK_OPEN_WINDOW_MINUTES && untilMinutes > 0) {
       if (!hasLockedOdds(match)) {
         if (!match.oddsAlertedAt) {
@@ -401,14 +413,6 @@ function getSchedulerActions(matches, picks, now) {
       }
       actions.push({
         type: ACTIONS.OPEN_PICK,
-        matchId: match.matchId,
-      });
-      return;
-    }
-
-    if (match.status === STATUSES.OPEN && untilMinutes <= 0) {
-      actions.push({
-        type: ACTIONS.LOCK_MATCH,
         matchId: match.matchId,
       });
       return;
@@ -498,6 +502,7 @@ function formatCommands(isAdmin) {
       "/set_odds <matchId> <HOME|AWAY> <handicap> - Nhập kèo",
       "/open <matchId> - Mở pick thủ công",
       "/lock <matchId> - Khóa pick thủ công",
+      "/lock_summary <matchId> - Gửi lại AI pick đã chốt",
       "/result <matchId> <home-away> <diễn biến> - Nhập kết quả",
       "/settle <matchId> - Chốt điểm",
       "/recap <matchId> - Gửi lại recap",
@@ -678,6 +683,9 @@ function formatLockedPickSummary(match, picks) {
 
 function buildLockDramaPrompt(input) {
   var facts = input.facts;
+  var titleParts = String(facts.title || "").split(" vs ");
+  var homePickLabel = facts.homeLabel || titleParts[0] || "Đội nhà";
+  var awayPickLabel = facts.awayLabel || titleParts[1] || "Đội khách";
   return [
     "Bạn là người dẫn chương trình cho một game dự đoán World Cup nội bộ.",
     "Hãy viết một tin nhắn Telegram bằng tiếng Việt sau khi trận đã khóa pick.",
@@ -690,9 +698,9 @@ function buildLockDramaPrompt(input) {
     "- Giờ đá: " + facts.kickoff,
     "- Kèo: " + facts.handicap,
     "- Tổng pick: " + facts.totalPicks,
-    "- Pick đội nhà: " + facts.homePicks,
+    "- Pick " + homePickLabel + ": " + facts.homePicks,
     "- Pick hòa: " + facts.drawPicks + (facts.drawWasOpen ? "" : " (cửa hòa không mở vì kèo không tròn)"),
-    "- Pick đội khách: " + facts.awayPicks,
+    "- Pick " + awayPickLabel + ": " + facts.awayPicks,
     "- Ngôi sao hi vọng: " + facts.starPicks,
   ].join("\n");
 }
@@ -1615,6 +1623,7 @@ if (typeof module !== "undefined") {
     STATUSES: STATUSES,
     buildDefaultOddsPatch: buildDefaultOddsPatch,
     canChangePick: canChangePick,
+    canSendLockSummary: canSendLockSummary,
     canSetOdds: canSetOdds,
     buildPickKeyboard: buildPickKeyboard,
     buildAiOddsProposalPrompt: buildAiOddsProposalPrompt,
