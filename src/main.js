@@ -582,19 +582,33 @@ function openMatch(matchId, actor, replyChatId) {
 function alertMissingOdds(match) {
   if (match.oddsAlertedAt) return;
   var now = new Date();
+  var adminMessage;
   try {
     var proposal = isDryRunMatch(match) ? buildDryRunOddsProposal(match) : generateAiOddsProposal(match);
     updateMatch(
       match.matchId,
-      Object.assign({ oddsAlertedAt: now.toISOString() }, buildOddsProposalPatch(proposal, now)),
+      Object.assign({ oddsAlertedAt: now.toISOString() }, buildAutoApplyOddsProposalPatch(proposal, now)),
       "scheduler",
-      "ODDS_PROPOSAL"
+      "AUTO_APPLY_ODDS_PROPOSAL"
     );
-    sendToAdmins(formatAdminOddsProposal(match, proposal), buildOddsProposalConfirmKeyboard(match.matchId, proposal));
+    adminMessage = formatAdminOddsProposal(match, proposal);
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
-    updateMatch(match.matchId, { oddsAlertedAt: now.toISOString() }, "scheduler", "ODDS_ALERT");
-    sendToAdmins("⚠️ Còn dưới 24h tới " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " nhưng chưa có kèo. Dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.");
+    updateMatch(
+      match.matchId,
+      Object.assign({ oddsAlertedAt: now.toISOString() }, buildDefaultOddsPatch(now), {
+        oddsProposalDecision: "DEFAULTED",
+        oddsProposalDecidedAt: now.toISOString(),
+      }),
+      "scheduler",
+      "AUTO_DEFAULT_ODDS"
+    );
+    adminMessage = "⚠️ Còn dưới 24h tới " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " nhưng bot không lấy được kèo rõ. Bot đã mở pick bằng kèo mặc định: " + sideDisplayName(match, SELECTIONS.HOME) + " chấp " + sideDisplayName(match, SELECTIONS.AWAY) + " 0 Trái. Nếu cần chỉnh, dùng /set_odds " + match.matchId + " <HOME|AWAY> <-0.5>.";
+  }
+  try {
+    openMatch(match.matchId, "scheduler");
+  } finally {
+    sendToAdmins(adminMessage);
   }
 }
 

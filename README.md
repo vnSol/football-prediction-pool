@@ -4,8 +4,8 @@ Google Apps Script + Telegram Bot automation for an internal World Cup predictio
 
 ## What It Does
 
-- At T-24h, uses AI/web search to summarize missing handicap odds from Bet365, Unibet, and Bwin for admin verification, then opens picks after admin confirms.
-- Opens Telegram picks after odds are set.
+- At T-24h, uses AI/web search to summarize missing handicap odds from Bet365, Unibet, and Bwin, applies the proposed line automatically, and opens picks.
+- Notifies admins with the odds/source summary so they can adjust later with `/set_odds` if needed.
 - Lets players change picks through Telegram until kickoff.
 - Lets players self-register by messaging the bot directly with `/join`.
 - Sends T-2h and T-30m reminders to players who have not picked.
@@ -127,7 +127,7 @@ Players can direct-message `/join` to add themselves to `Players` with `active=t
 
 The bot uses OpenAI for four automated messages:
 
-- At T-24h before kickoff when odds are missing: an admin-only handicap proposal using web search over fixed Bet365, Unibet, and Bwin sources. The bot averages available lines from those three sources, links any source it found, and falls back to admin confirmation when all three are missing. Admin taps Y to write odds and open picks, or taps N to reject and use `/set_odds`.
+- At T-24h before kickoff when odds are missing: an admin-only handicap summary using web search over fixed Bet365, Unibet, and Bwin sources. The bot averages available lines from those three sources, applies the proposed line, opens picks immediately, and links any source it found. If all three are missing or unclear, it opens with the default HOME 0 line. Admins can review the message and adjust with `/set_odds`.
 - After lock: a suspenseful betting summary based only on Sheet facts, followed by a deterministic list of every player's final pick.
 - At T+120m after kickoff: an admin-only result proposal using web search over 1-2 public sources. The message includes match status, proposed score if available, source links, and Y/N buttons. Admin verifies the links, taps Y to auto-write the result and settle, or taps N to reject.
 - After settle: a localized match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.
@@ -169,7 +169,7 @@ Syntax:
 
 If omitted, the bot uses the current time when the command runs. The generated matches are scheduled relative to `baseTimeUtc`, with enough cases to test orchestration: group half handicap, group integer handicap, knockout half handicap, knockout integer/zero handicap, and one scheduled match without odds to trigger the AI/search odds proposal flow.
 
-`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, upserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. Existing `DRY-` matches are refreshed with the new schedule, odds, status, admin odds/result prompt markers, and cleared proposal/result fields. If the AI call fails, the bot uses a deterministic fallback set. Use `/reset_sheet` when you want to clear old dry-run picks and score rows too. For synthetic missing-odds dry-run matches, the bot sends a synthetic handicap proposal instead of using public source links; tapping Y writes the proposed odds and opens picks.
+`/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, upserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. Existing `DRY-` matches are refreshed with the new schedule, odds, status, admin odds/result prompt markers, and cleared proposal/result fields. If the AI call fails, the bot uses a deterministic fallback set. Use `/reset_sheet` when you want to clear old dry-run picks and score rows too. For synthetic missing-odds dry-run matches, the bot sends a synthetic handicap summary, auto-applies the proposed odds, and opens picks.
 
 Use `/dryrun_finish` to simulate the T+120 result-proposal step for all unsettled `DRY-` matches. The bot locks any unfinished dry-run match and sends synthetic result proposals with Y/N buttons to the admin chat. Tapping Y writes the proposed final score and auto-settles; tapping N rejects the proposal. Because dry-run matches are synthetic, these proposals do not include public source links; production T+120 prompts still use AI/web search over 1-2 public sources.
 

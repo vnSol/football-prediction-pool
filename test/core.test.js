@@ -44,6 +44,7 @@ const {
   buildDryRunResultPrompt,
   buildDryRunResultProposal,
   buildDryRunOddsProposal,
+  buildAutoApplyOddsProposalPatch,
   buildOddsProposalConfirmKeyboard,
   buildOddsProposalPatch,
   buildResultProposalConfirmKeyboard,
@@ -491,9 +492,10 @@ test("formats game rules for players", () => {
   assert.match(rules, /không trả lời trong group/);
   assert.match(rules, /T-24h/);
   assert.match(rules, /Bet365, Unibet, Bwin/);
+  assert.match(rules, /tự áp kèo đề xuất và mở pick/);
   assert.match(rules, /trung bình cộng/);
   assert.match(rules, /cả 3 nguồn/);
-  assert.match(rules, /admin xác nhận thủ công/);
+  assert.match(rules, /admin có thể chỉnh bằng \/set_odds/);
   assert.match(rules, /T-2h/);
   assert.match(rules, /T-30m/);
   assert.match(rules, /auto chọn đội kèo trên/);
@@ -1060,7 +1062,7 @@ test("builds final result patch from confirmed proposal", () => {
   assert.throws(() => buildConfirmResultProposalPatch({ resultProposalHomeScore: "", resultProposalAwayScore: "" }), /missing score/);
 });
 
-test("builds AI odds proposal prompt for admin confirmation", () => {
+test("builds AI odds proposal prompt for auto-apply", () => {
   const prompt = buildAiOddsProposalPrompt({
     matchId: "DRY-C1-FINAL-2026",
     homeTeam: "Paris Saint-Germain",
@@ -1078,7 +1080,7 @@ test("builds AI odds proposal prompt for admin confirmation", () => {
   assert.match(prompt, /Asian handicap/);
   assert.match(prompt, /JSON/);
   assert.match(prompt, /không bịa/i);
-  assert.match(prompt, /admin confirm/);
+  assert.match(prompt, /admin có thể sửa sau bằng \/set_odds/);
   assert.match(prompt, /DRY-C1-FINAL-2026/);
 });
 
@@ -1118,10 +1120,11 @@ test("normalizes and formats AI odds proposal for admin verification", () => {
   assert.match(message, /Bet365: Paris Saint-Germain chấp Arsenal 0.5 Trái - https:\/\/bet365\.example\/odds/);
   assert.match(message, /Unibet: Paris Saint-Germain chấp Arsenal 0.25 Trái - https:\/\/unibet\.example\/odds/);
   assert.match(message, /Bwin: Paris Saint-Germain chấp Arsenal 0.5 Trái - https:\/\/bwin\.example\/odds/);
-  assert.match(message, /bấm Y để ghi kèo và mở pick/);
+  assert.match(message, /Bot đã tự ghi kèo này và mở pick ở T-24/);
+  assert.match(message, /nếu cần chỉnh thì dùng \/set_odds DRY-C1-FINAL-2026/);
 });
 
-test("leaves odds unconfirmed when all fixed bookmaker sources are missing", () => {
+test("leaves proposal odds empty when all fixed bookmaker sources are missing", () => {
   const proposal = normalizeAiOddsProposal({
     bookmakerLines: [
       { bookmaker: "Bet365", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
@@ -1133,7 +1136,7 @@ test("leaves odds unconfirmed when all fixed bookmaker sources are missing", () 
   assert.deepEqual(proposal, {
     favoriteSide: null,
     handicapGoals: null,
-    summary: "Cả 3 nguồn cố định chưa có kèo public đủ rõ; cần admin xác nhận thủ công.",
+    summary: "Cả 3 nguồn cố định chưa có kèo public đủ rõ; bot sẽ dùng kèo mặc định để mở pick.",
     sources: [],
     bookmakerLines: [
       { bookmaker: "Bet365", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
@@ -1147,7 +1150,61 @@ test("leaves odds unconfirmed when all fixed bookmaker sources are missing", () 
   });
 });
 
-test("builds odds proposal patch, confirm keyboard, and confirmed odds patch", () => {
+test("builds auto-apply odds patch from a clear proposal", () => {
+  assert.deepEqual(
+    buildAutoApplyOddsProposalPatch(
+      {
+        favoriteSide: SELECTIONS.HOME,
+        handicapGoals: 0.5,
+        summary: "PSG chấp nửa trái",
+        sources: ["https://example.com/odds"],
+      },
+      date("2026-05-30T10:00:00.000Z")
+    ),
+    {
+      oddsProposalFavoriteSide: SELECTIONS.HOME,
+      oddsProposalHandicapGoals: 0.5,
+      oddsProposalSummary: "PSG chấp nửa trái",
+      oddsProposalSources: "https://example.com/odds",
+      oddsProposalAt: "2026-05-30T10:00:00.000Z",
+      oddsProposalDecision: "AUTO_APPLIED",
+      oddsProposalDecidedAt: "2026-05-30T10:00:00.000Z",
+      favoriteSide: SELECTIONS.HOME,
+      handicapSide: SELECTIONS.HOME,
+      handicapGoals: 0.5,
+      oddsLockedAt: "2026-05-30T10:00:00.000Z",
+    }
+  );
+});
+
+test("builds default auto-apply odds patch when no clear proposal exists", () => {
+  assert.deepEqual(
+    buildAutoApplyOddsProposalPatch(
+      {
+        favoriteSide: null,
+        handicapGoals: null,
+        summary: "Cả 3 nguồn chưa có line rõ",
+        sources: [],
+      },
+      date("2026-05-30T10:00:00.000Z")
+    ),
+    {
+      oddsProposalFavoriteSide: "",
+      oddsProposalHandicapGoals: "",
+      oddsProposalSummary: "Cả 3 nguồn chưa có line rõ",
+      oddsProposalSources: "",
+      oddsProposalAt: "2026-05-30T10:00:00.000Z",
+      oddsProposalDecision: "DEFAULTED",
+      oddsProposalDecidedAt: "2026-05-30T10:00:00.000Z",
+      favoriteSide: SELECTIONS.HOME,
+      handicapSide: SELECTIONS.HOME,
+      handicapGoals: 0,
+      oddsLockedAt: "2026-05-30T10:00:00.000Z",
+    }
+  );
+});
+
+test("builds legacy odds proposal confirmation helpers", () => {
   const proposal = {
     favoriteSide: SELECTIONS.HOME,
     handicapGoals: 0.5,

@@ -520,10 +520,10 @@ function formatRules() {
     "- Chỉ người chơi active=true mới nhận thông báo, được tính default pick và lên bảng điểm.",
     "",
     "2. Mở pick",
-    "- Bot mở pick ở T-24h nếu trận đã có kèo.",
-    "- Nếu thiếu kèo ở T-24h, bot tổng hợp kèo từ Bet365, Unibet, Bwin và gửi admin confirm.",
+    "- Bot mở pick ở T-24h.",
+    "- Nếu thiếu kèo ở T-24h, bot tổng hợp kèo từ Bet365, Unibet, Bwin, tự áp kèo đề xuất và mở pick.",
     "- Kèo đề xuất là trung bình cộng các nguồn có line; nguồn nào có link thì bot dẫn link nguồn đó.",
-    "- Nếu cả 3 nguồn đều chưa có kèo đủ rõ, admin xác nhận thủ công bằng /set_odds.",
+    "- Nếu cả 3 nguồn đều chưa có kèo đủ rõ, bot mở bằng kèo mặc định; admin có thể chỉnh bằng /set_odds.",
     "- Người chơi có thể đổi pick đến trước giờ bóng lăn.",
     "",
     "3. Cách pick",
@@ -907,7 +907,7 @@ function buildAiOddsProposalPrompt(match) {
     "Trước T-24h, hãy dùng web search để đọc Asian handicap/handicap line từ đúng 3 nguồn cố định: Bet365, Unibet, Bwin.",
     "Không dùng nguồn khác để lấy kèo. Nguồn khác chỉ được bỏ qua, không được dùng để suy luận line.",
     "Với từng bookmaker, nếu không có line public đủ rõ hoặc không truy cập được, để favoriteSide và handicapGoals là null và ghi note ngắn.",
-    "Bot sẽ tự tính kèo đề xuất bằng trung bình cộng các nguồn có line trong 3 nguồn cố định; nếu cả 3 đều không có thì admin confirm thủ công.",
+    "Bot sẽ tự tính kèo bằng trung bình cộng các nguồn có line trong 3 nguồn cố định; nếu cả 3 đều không có thì bot dùng kèo mặc định và admin có thể sửa sau bằng /set_odds.",
     "Không bịa kèo, nguồn hoặc diễn giải.",
     "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
     "",
@@ -1063,7 +1063,7 @@ function hasBookmakerOdds(line) {
 
 function buildAverageBookmakerSummary(aggregate) {
   if (!aggregate.validSourceCount) {
-    return "Cả 3 nguồn cố định chưa có kèo public đủ rõ; cần admin xác nhận thủ công.";
+    return "Cả 3 nguồn cố định chưa có kèo public đủ rõ; bot sẽ dùng kèo mặc định để mở pick.";
   }
   return "Tổng hợp trung bình cộng " + aggregate.validSourceCount + " nguồn có line từ Bet365, Unibet, Bwin.";
 }
@@ -1107,12 +1107,17 @@ function formatAdminOddsProposal(match, proposal) {
   var aggregateLine = hasBookmakerLines
     ? formatAverageBookmakerLine(normalized.bookmakerLines)
     : "";
+  var defaultOddsText = formatHandicap({
+    homeTeam: match.homeTeam,
+    awayTeam: match.awayTeam,
+    favoriteSide: SELECTIONS.HOME,
+    handicapSide: SELECTIONS.HOME,
+    handicapGoals: 0,
+  });
   var instructionLine = hasProposalOdds(normalized)
-    ? "Admin verify link nguồn rồi bấm Y để ghi kèo và mở pick, hoặc N để reject."
-    : "Admin verify link nguồn; đề xuất chưa có kèo đủ rõ nên bấm N rồi nhập tay nếu cần.";
-  var actionLine = hasProposalOdds(normalized)
-    ? "Bấm Y để ghi kèo và mở pick tự động."
-    : "Không có kèo đủ rõ để confirm; bấm N rồi nhập tay bằng /set_odds " + match.matchId + " <HOME|AWAY> <handicap>.";
+    ? "Bot đã tự ghi kèo này và mở pick ở T-24."
+    : "Bot chưa lấy được kèo đủ rõ, đã mở pick bằng kèo mặc định: " + defaultOddsText + ".";
+  var actionLine = "Admin kiểm tra nguồn; nếu cần chỉnh thì dùng /set_odds " + match.matchId + " <HOME|AWAY> <handicap>.";
 
   return [
     "⚖️ Đề xuất kèo AI/search cho " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
@@ -1129,7 +1134,7 @@ function formatAdminOddsProposal(match, proposal) {
 
 function formatAverageBookmakerLine(bookmakerLines) {
   var count = bookmakerLines.filter(hasBookmakerOdds).length;
-  if (!count) return "Tổng hợp: cả 3 nguồn cố định chưa có line đủ rõ; cần admin xác nhận thủ công.";
+  if (!count) return "Tổng hợp: cả 3 nguồn cố định chưa có line đủ rõ; bot dùng kèo mặc định để mở pick.";
   return "Tổng hợp: trung bình cộng " + count + " nguồn có line.";
 }
 
@@ -1159,6 +1164,27 @@ function buildOddsProposalPatch(proposal, now) {
     oddsProposalDecision: "",
     oddsProposalDecidedAt: "",
   };
+}
+
+function buildAutoApplyOddsProposalPatch(proposal, now) {
+  var at = now || new Date();
+  var iso = toIso(at);
+  var normalized = normalizeAiOddsProposal(proposal || {});
+  var patch = buildOddsProposalPatch(normalized, at);
+  if (!hasProposalOdds(normalized)) {
+    return Object.assign(patch, buildDefaultOddsPatch(at), {
+      oddsProposalDecision: "DEFAULTED",
+      oddsProposalDecidedAt: iso,
+    });
+  }
+  return Object.assign(patch, {
+    favoriteSide: normalized.favoriteSide,
+    handicapSide: normalized.favoriteSide,
+    handicapGoals: normalized.handicapGoals,
+    oddsLockedAt: iso,
+    oddsProposalDecision: "AUTO_APPLIED",
+    oddsProposalDecidedAt: iso,
+  });
 }
 
 function buildOddsProposalConfirmKeyboard(matchId, proposal) {
@@ -1468,7 +1494,7 @@ function buildDryRunOddsProposal(match) {
   return {
     favoriteSide: isValidSelection(match.favoriteSide) ? match.favoriteSide : SELECTIONS.HOME,
     handicapGoals: 0.5,
-    summary: "Kèo mô phỏng để test luồng AI/search đề xuất handicap và admin confirm.",
+    summary: "Kèo mô phỏng để test luồng AI/search tự áp handicap.",
     sources: [],
   };
 }
@@ -1595,6 +1621,7 @@ if (typeof module !== "undefined") {
     buildDryRunResultPrompt: buildDryRunResultPrompt,
     buildDryRunResultProposal: buildDryRunResultProposal,
     buildDryRunOddsProposal: buildDryRunOddsProposal,
+    buildAutoApplyOddsProposalPatch: buildAutoApplyOddsProposalPatch,
     buildOddsProposalConfirmKeyboard: buildOddsProposalConfirmKeyboard,
     buildOddsProposalPatch: buildOddsProposalPatch,
     buildResultProposalConfirmKeyboard: buildResultProposalConfirmKeyboard,
