@@ -58,7 +58,7 @@ function shouldIgnoreDirectOnlyCommandInChat(commandName, chat) {
 
 function shouldHandlePickCallbackInChat(action, chat) {
   var normalizedAction = String(action || "").toLowerCase();
-  if (normalizedAction !== "pick" && normalizedAction !== "star") return true;
+  if (normalizedAction !== "pick" && normalizedAction !== "pick_star" && normalizedAction !== "star") return true;
   return isPrivateTelegramChat(chat);
 }
 
@@ -1302,6 +1302,21 @@ function parseCallbackData(value) {
 }
 
 function buildPickKeyboard(match) {
+  if (isKnockout(match)) {
+    return {
+      inline_keyboard: [
+        [
+          { text: sideDisplayName(match, SELECTIONS.HOME), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.HOME },
+          { text: sideDisplayName(match, SELECTIONS.AWAY), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.AWAY },
+        ],
+        [
+          { text: sideDisplayName(match, SELECTIONS.HOME) + " ⭐", callback_data: "pick_star|" + match.matchId + "|" + SELECTIONS.HOME },
+          { text: sideDisplayName(match, SELECTIONS.AWAY) + " ⭐", callback_data: "pick_star|" + match.matchId + "|" + SELECTIONS.AWAY },
+        ],
+      ],
+    };
+  }
+
   var pickRow = [
     { text: sideDisplayName(match, SELECTIONS.HOME), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.HOME },
   ];
@@ -1312,13 +1327,7 @@ function buildPickKeyboard(match) {
 
   pickRow.push({ text: sideDisplayName(match, SELECTIONS.AWAY), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.AWAY });
 
-  var keyboard = [pickRow];
-
-  if (isKnockout(match)) {
-    keyboard.push([{ text: "⭐ Ngôi sao hi vọng", callback_data: "star|" + match.matchId + "|toggle" }]);
-  }
-
-  return { inline_keyboard: keyboard };
+  return { inline_keyboard: [pickRow] };
 }
 
 function buildResetSheetKeyboard(sheetNames) {

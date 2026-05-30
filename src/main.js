@@ -245,10 +245,20 @@ function handleCallbackQuery(callbackQuery) {
   }
 
   if (data.action === "pick" && isValidSelection(data.value)) {
-    var previous = getPick(match.matchId, telegramUserId);
-    var pick = upsertPick(match, player, data.value, previous ? previous.star : false, SOURCE.TELEGRAM, telegramUserId);
+    var pick = upsertPick(match, player, data.value, false, SOURCE.TELEGRAM, telegramUserId);
     answerCallbackQuery(callbackQuery.id, "Đã chọn " + match.matchId + ": " + sideDisplayName(match, pick.selection));
     sendTelegramMessage(chatId, formatPickConfirmationMessage(match, pick));
+    return;
+  }
+
+  if (data.action === "pick_star" && isValidSelection(data.value)) {
+    if (!isKnockout(match)) {
+      answerCallbackQuery(callbackQuery.id, "Ngôi sao chỉ dùng cho vòng loại.");
+      return;
+    }
+    var starredPick = upsertPick(match, player, data.value, true, SOURCE.TELEGRAM, telegramUserId);
+    answerCallbackQuery(callbackQuery.id, "Đã chọn " + match.matchId + ": " + sideDisplayName(match, starredPick.selection) + " ⭐");
+    sendTelegramMessage(chatId, formatPickConfirmationMessage(match, starredPick));
     return;
   }
 

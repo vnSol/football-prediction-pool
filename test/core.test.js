@@ -477,8 +477,10 @@ test("keeps player commands and pick callbacks private-only", () => {
   assert.equal(shouldIgnoreDirectOnlyCommandInChat("rules", groupChat), false);
   assert.equal(shouldIgnoreDirectOnlyCommandInChat("set_odds", groupChat), false);
   assert.equal(shouldHandlePickCallbackInChat("pick", groupChat), false);
+  assert.equal(shouldHandlePickCallbackInChat("pick_star", groupChat), false);
   assert.equal(shouldHandlePickCallbackInChat("star", groupChat), false);
   assert.equal(shouldHandlePickCallbackInChat("pick", privateChat), true);
+  assert.equal(shouldHandlePickCallbackInChat("pick_star", privateChat), true);
   assert.equal(shouldHandlePickCallbackInChat("odds_confirm", groupChat), true);
 });
 
@@ -669,7 +671,7 @@ test("parses Telegram slash commands", () => {
   });
 });
 
-test("parses callback data and builds pick keyboard", () => {
+test("parses callback data and builds group-stage pick keyboard", () => {
   assert.deepEqual(parseCallbackData("pick|M001|DRAW"), {
     action: "pick",
     matchId: "M001",
@@ -678,9 +680,10 @@ test("parses callback data and builds pick keyboard", () => {
 
   const keyboard = buildPickKeyboard({
     matchId: "M001",
-    stage: "KNOCKOUT",
+    stage: "GROUP",
     homeTeam: "Brazil",
     awayTeam: "Japan",
+    handicapGoals: 0,
   });
 
   assert.deepEqual(keyboard.inline_keyboard[0], [
@@ -688,8 +691,33 @@ test("parses callback data and builds pick keyboard", () => {
     { text: "Hòa", callback_data: "pick|M001|DRAW" },
     { text: "🇯🇵 Japan", callback_data: "pick|M001|AWAY" },
   ]);
-  assert.deepEqual(keyboard.inline_keyboard[1], [
-    { text: "⭐ Ngôi sao hi vọng", callback_data: "star|M001|toggle" },
+  assert.equal(keyboard.inline_keyboard.length, 1);
+});
+
+test("builds four fixed choices for knockout pick keyboard", () => {
+  assert.deepEqual(parseCallbackData("pick_star|M001|HOME"), {
+    action: "pick_star",
+    matchId: "M001",
+    value: "HOME",
+  });
+
+  const keyboard = buildPickKeyboard({
+    matchId: "M001",
+    stage: "KNOCKOUT",
+    homeTeam: "Brazil",
+    awayTeam: "Japan",
+    handicapGoals: 0,
+  });
+
+  assert.deepEqual(keyboard.inline_keyboard, [
+    [
+      { text: "🇧🇷 Brazil", callback_data: "pick|M001|HOME" },
+      { text: "🇯🇵 Japan", callback_data: "pick|M001|AWAY" },
+    ],
+    [
+      { text: "🇧🇷 Brazil ⭐", callback_data: "pick_star|M001|HOME" },
+      { text: "🇯🇵 Japan ⭐", callback_data: "pick_star|M001|AWAY" },
+    ],
   ]);
 });
 
