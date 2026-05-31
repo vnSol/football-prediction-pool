@@ -475,6 +475,7 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/matches/);
   assert.match(adminCommands, /\/set_odds/);
   assert.match(adminCommands, /\/lock_summary <matchId>/);
+  assert.match(adminCommands, /\/ai_result <matchId>/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
   assert.match(adminCommands, /đề xuất kết quả/);

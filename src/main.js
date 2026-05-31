@@ -117,6 +117,7 @@ function handleMessage(message) {
   if (command.name === "open") return openMatch(command.args[0], message.from.id, chatId);
   if (command.name === "lock") return lockMatch(command.args[0], message.from.id, chatId);
   if (command.name === "lock_summary") return resendLockSummary(command.args[0], chatId);
+  if (command.name === "ai_result") return adminAiResult(chatId, message.from.id, command.args);
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
   if (command.name === "settle") return settleMatch(command.args[0], message.from.id, chatId);
   if (command.name === "recap") return resendRecap(command.args[0], chatId);
@@ -698,20 +699,40 @@ function buildFallbackLockMessage(match, picks) {
   ].join("\n");
 }
 
-function promptResult(match) {
-  updateMatch(match.matchId, { adminResultPromptedAt: new Date().toISOString() }, "scheduler", "PROMPT_RESULT");
+function promptResult(match, replyChatId, actor) {
+  var source = actor || "scheduler";
+  updateMatch(match.matchId, { adminResultPromptedAt: new Date().toISOString() }, source, "PROMPT_RESULT");
   var text;
   var keyboard;
   try {
     var proposal = generateAiResultProposal(match);
-    updateMatch(match.matchId, buildResultProposalPatch(proposal), "scheduler", "STORE_RESULT_PROPOSAL");
+    updateMatch(match.matchId, buildResultProposalPatch(proposal), source, "STORE_RESULT_PROPOSAL");
     text = formatAdminResultProposal(match, proposal);
     keyboard = buildResultProposalConfirmKeyboard(match.matchId, proposal);
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
     text = "🔎 Cần xác nhận kết quả " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Dùng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".";
   }
-  sendToAdmins(text, keyboard);
+  if (replyChatId) sendTelegramMessage(replyChatId, text, keyboard);
+  else sendToAdmins(text, keyboard);
+}
+
+function adminAiResult(chatId, actor, args) {
+  var matchId = args[0];
+  var match = getMatchById(matchId);
+  if (!match) {
+    sendTelegramMessage(chatId, "Không tìm thấy trận. Cú pháp: /ai_result <matchId>");
+    return;
+  }
+  if (match.status === STATUSES.SETTLED) {
+    sendTelegramMessage(chatId, "Trận " + matchId + " đã settle rồi. Nếu cần gửi lại recap, dùng /recap " + matchId + ".");
+    return;
+  }
+  if (match.status !== STATUSES.LOCKED) {
+    sendTelegramMessage(chatId, "Chỉ dùng /ai_result khi trận đã LOCKED. Nếu cần khóa trước, dùng /lock " + matchId + ".");
+    return;
+  }
+  promptResult(match, chatId, actor);
 }
 
 function adminSetResult(chatId, actor, args) {

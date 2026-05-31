@@ -116,6 +116,7 @@ Use player commands and pick buttons in direct messages with the bot. The bot ig
 - `/open <matchId>`
 - `/lock <matchId>`
 - `/lock_summary <matchId>`
+- `/ai_result <matchId>`
 - `/result <matchId> <home-away> <event 1; event 2; event 3>`
 - `/settle <matchId>`
 - `/recap <matchId>`

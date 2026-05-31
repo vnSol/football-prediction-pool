@@ -503,6 +503,7 @@ function formatCommands(isAdmin) {
       "/open <matchId> - Mở pick thủ công",
       "/lock <matchId> - Khóa pick thủ công",
       "/lock_summary <matchId> - Gửi lại AI pick đã chốt",
+      "/ai_result <matchId> - AI tìm kết quả, gửi đề xuất Y/N; confirm thì settle và recap",
       "/result <matchId> <home-away> <diễn biến> - Nhập kết quả",
       "/settle <matchId> - Chốt điểm",
       "/recap <matchId> - Gửi lại recap",
