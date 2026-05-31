@@ -10,8 +10,8 @@ Google Apps Script + Telegram Bot automation for an internal World Cup predictio
 - Lets players self-register by messaging the bot directly with `/join`.
 - Sends T-2h and T-30m reminders to players who have not picked.
 - Locks at kickoff, defaults missing picks to the favorite side, and posts a group lock summary with every player's final pick.
-- At T+120m, uses AI/web search to propose score, match status, and public source links for admin verification.
-- Lets admins confirm final scores after checking the source links.
+- At T+120m, uses AI/web search to propose the settlement score, match status, and public source links for admin verification.
+- Lets admins confirm settlement scores after checking the source links. Settlement scores are 90 minutes plus stoppage time, excluding extra time and penalty shootouts.
 - Settles points, updates Google Sheets, and sends a cheerful recap + leaderboard.
 - Locks Sheets so players cannot overwrite data directly.
 
@@ -117,8 +117,9 @@ Use player commands and pick buttons in direct messages with the bot. The bot ig
 - `/lock <matchId>`
 - `/lock_summary <matchId>`
 - `/ai_result <matchId>`
-- `/result <matchId> <home-away> <event 1; event 2; event 3>`
+- `/result <matchId> <home-away after 90m+stoppage, no ET/penalties> <event 1; event 2; event 3>`
 - `/settle <matchId>`
+- `/reset_latest_settle`
 - `/recap <matchId>`
 
 Manual commands are fallback controls. Normal flow is handled by `runScheduler()`. If `/set_odds` is used for a scheduled match inside T-24h, the bot opens pick immediately.
@@ -155,6 +156,8 @@ Use `_` for spaces in team names when needed; the bot stores `_` as spaces.
 
 `/reset_sheet` shows sheet-name buttons and asks for confirmation before clearing data rows. It keeps headers and protection in place.
 
+`/reset_latest_settle` undoes the most recently settled match: it clears that match's rows from `Scores`, moves the match back to `LOCKED`, and clears `handicapOutcome`/`settledAt`. The entered result stays in `Matches`, so `/settle <matchId>` can be run again after corrections.
+
 ### `/dryrun` parameter
 
 Syntax:
@@ -173,7 +176,7 @@ If omitted, the bot uses the current time when the command runs. The generated m
 
 `/dryrun` asks the AI model to create 3-5 synthetic matches, normalizes them into orchestration-ready cases with `DRY-` match IDs, upserts them, and runs one scheduler pass so `/matches` can show newly opened picks immediately. Existing `DRY-` matches are refreshed with the new schedule, odds, status, admin odds/result prompt markers, and cleared proposal/result fields. If the AI call fails, the bot uses a deterministic fallback set. Use `/reset_sheet` when you want to clear old dry-run picks and score rows too. For synthetic missing-odds dry-run matches, the bot sends a synthetic handicap summary, auto-applies the proposed odds, and opens picks.
 
-Use `/dryrun_finish` to simulate the T+120 result-proposal step for all unsettled `DRY-` matches. The bot locks any unfinished dry-run match and sends synthetic result proposals with Y/N buttons to the admin chat. Tapping Y writes the proposed final score and auto-settles; tapping N rejects the proposal. Because dry-run matches are synthetic, these proposals do not include public source links; production T+120 prompts still use AI/web search over 1-2 public sources.
+Use `/dryrun_finish` to simulate the T+120 result-proposal step for all unsettled `DRY-` matches. The bot locks any unfinished dry-run match and sends synthetic result proposals with Y/N buttons to the admin chat. Tapping Y writes the proposed settlement score and auto-settles; tapping N rejects the proposal. Because dry-run matches are synthetic, these proposals do not include public source links; production T+120 prompts still use AI/web search over 1-2 public sources.
 
 ## Telegram Spam / Retry Recovery
 

@@ -329,9 +329,11 @@ function getHandicapOutcome(match, score) {
   var awayAdjusted = Number(score.awayScore);
   var handicap = Number(match.handicapGoals || 0);
   var handicapSide = match.handicapSide || match.favoriteSide;
+  var givingSide = handicap >= 0 ? handicapSide : oppositeSide(handicapSide);
+  var handicapAmount = Math.abs(handicap);
 
-  if (handicapSide === SELECTIONS.HOME) homeAdjusted += handicap;
-  if (handicapSide === SELECTIONS.AWAY) awayAdjusted += handicap;
+  if (givingSide === SELECTIONS.HOME) homeAdjusted -= handicapAmount;
+  if (givingSide === SELECTIONS.AWAY) awayAdjusted -= handicapAmount;
 
   if (Math.abs(homeAdjusted - awayAdjusted) < 0.000001) return SELECTIONS.DRAW;
   return homeAdjusted > awayAdjusted ? SELECTIONS.HOME : SELECTIONS.AWAY;
@@ -347,6 +349,33 @@ function scorePick(match, pick, score) {
     correct: correct,
     points: points,
     outcome: outcome,
+  };
+}
+
+function timestampOrZero(value) {
+  var time = value ? toDate(value).getTime() : 0;
+  return isFinite(time) ? time : 0;
+}
+
+function getLatestSettledMatch(matches) {
+  return (matches || [])
+    .filter(function (match) {
+      return match && (match.status === STATUSES.SETTLED || match.settledAt);
+    })
+    .sort(function (left, right) {
+      var settledDiff = timestampOrZero(right.settledAt) - timestampOrZero(left.settledAt);
+      if (settledDiff !== 0) return settledDiff;
+      var kickoffDiff = timestampOrZero(right.kickoffUtc) - timestampOrZero(left.kickoffUtc);
+      if (kickoffDiff !== 0) return kickoffDiff;
+      return String(right.matchId || "").localeCompare(String(left.matchId || ""));
+    })[0] || null;
+}
+
+function buildResetSettlementPatch() {
+  return {
+    status: STATUSES.LOCKED,
+    handicapOutcome: "",
+    settledAt: "",
   };
 }
 
@@ -503,9 +532,10 @@ function formatCommands(isAdmin) {
       "/open <matchId> - Mở pick thủ công",
       "/lock <matchId> - Khóa pick thủ công",
       "/lock_summary <matchId> - Gửi lại AI pick đã chốt",
-      "/ai_result <matchId> - AI tìm kết quả, gửi đề xuất Y/N; confirm thì settle và recap",
-      "/result <matchId> <home-away> <diễn biến> - Nhập kết quả",
+      "/ai_result <matchId> - AI tìm tỉ số tính kèo, gửi đề xuất Y/N; confirm thì settle và recap",
+      "/result <matchId> <home-away> <diễn biến> - Nhập tỉ số tính kèo sau 90' + bù giờ, không hiệp phụ/luân lưu",
       "/settle <matchId> - Chốt điểm",
+      "/reset_latest_settle - Undo settle trận đã settle gần nhất và tính lại leaderboard",
       "/recap <matchId> - Gửi lại recap",
       "/reset_sheet - Reset dữ liệu sheet",
       "/dryrun [baseTimeUtc ISO UTC] - Tạo dữ liệu mô phỏng",
@@ -547,9 +577,10 @@ function formatRules() {
     "- Pick sai: 0 điểm.",
     "- Trận knockout có Ngôi sao hi vọng: đúng +2 điểm, sai -1 điểm.",
     "- Ngôi sao hi vọng chỉ áp dụng cho trận knockout.",
+    "- Kết quả tính kèo là tỉ số sau 90 phút + bù giờ; không tính 2 hiệp phụ hoặc loạt luân lưu.",
     "",
     "6. Kết quả",
-    "- Sau T+120m, bot đề xuất tỉ số/kết quả kèm nguồn public cho admin confirm.",
+    "- Sau T+120m, bot đề xuất tỉ số tính kèo kèm nguồn public cho admin confirm.",
     "- Admin confirm thì bot tự settle điểm, cập nhật leaderboard và gửi recap.",
   ].join("\n");
 }
@@ -726,7 +757,7 @@ function buildAiRecapPrompt(input) {
     "Facts đã xác nhận:",
     "- Trận: " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
     "- Giờ đá: " + formatKickoffTime(match.kickoffUtc),
-    "- Tỉ số final: " + sideDisplayName(match, SELECTIONS.HOME) + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + sideDisplayName(match, SELECTIONS.AWAY),
+    "- Tỉ số tính kèo (90' + bù giờ, không hiệp phụ/luân lưu): " + sideDisplayName(match, SELECTIONS.HOME) + " " + Number(score.homeScore) + "-" + Number(score.awayScore) + " " + sideDisplayName(match, SELECTIONS.AWAY),
     "- Kèo: " + formatHandicap(match),
     "",
     "Điểm betting:",
@@ -748,14 +779,16 @@ function buildAiRecapPrompt(input) {
 function buildAiResultProposalPrompt(match) {
   return [
     "Bạn là trợ lý vận hành cho game dự đoán World Cup nội bộ.",
-    "Sau T+120 phút, hãy dùng web search như Google để đọc 1-2 nguồn public và đề xuất kết quả cho admin confirm.",
+    "Sau T+120 phút, hãy dùng web search như Google để đọc 1-2 nguồn public và đề xuất tỉ số tính kèo cho admin confirm.",
+    "Luật settle: homeScore/awayScore CHỈ là tỉ số sau 90 phút + bù giờ; KHÔNG tính 2 hiệp phụ hoặc loạt luân lưu.",
+    "Nếu nguồn ghi 'hòa 1-1 sau 90 phút, thắng 2-1 sau hiệp phụ, thắng 4-3 luân lưu', hãy trả homeScore/awayScore là 1 và 1; có thể nhắc hiệp phụ/luân lưu trong summary.",
     "Ưu tiên nguồn chính thống/có uy tín như FIFA, trang giải đấu, ESPN, BBC, Reuters hoặc AP.",
     "Chỉ đề xuất khi nguồn public đủ rõ; nếu chưa rõ thì status UNKNOWN và homeScore/awayScore là null.",
     "Không bịa tỉ số, trạng thái, diễn biến hoặc nguồn.",
     "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
     "",
     "Schema:",
-    '{ "status": "FINISHED|LIVE|NOT_STARTED|POSTPONED|CANCELLED|UNKNOWN", "homeScore": number|null, "awayScore": number|null, "summary": "ngắn gọn", "sources": ["https://...", "https://..."] }',
+    '{ "status": "FINISHED|LIVE|NOT_STARTED|POSTPONED|CANCELLED|UNKNOWN", "homeScore": number|null, "awayScore": number|null, "homeScoreAfterRegulation": number|null, "awayScoreAfterRegulation": number|null, "summary": "ngắn gọn", "sources": ["https://...", "https://..."] }',
     "",
     "Match facts:",
     "- matchId: " + match.matchId,
@@ -763,6 +796,138 @@ function buildAiResultProposalPrompt(match) {
     "- awayTeam: " + sideName(match, SELECTIONS.AWAY),
     "- kickoff: " + formatKickoffTime(match.kickoffUtc),
   ].join("\n");
+}
+
+function findExplicitProposalScore(result, directKeys, nestedSideKeys) {
+  var direct = result || {};
+  for (var index = 0; index < directKeys.length; index += 1) {
+    var directKey = directKeys[index];
+    if (direct[directKey] !== "" && direct[directKey] != null) return { found: true, value: direct[directKey] };
+  }
+
+  var nestedKeys = [
+    "scoreAfterRegulation",
+    "scoreAtFullTime",
+    "fullTimeScore",
+    "scoreAfter90",
+    "score90",
+    "scoreAfterStoppage",
+    "settlementScore",
+    "scoreForSettlement",
+    "bettingScore",
+    "scoreForBetting",
+  ];
+
+  for (var nestedIndex = 0; nestedIndex < nestedKeys.length; nestedIndex += 1) {
+    var nested = direct[nestedKeys[nestedIndex]];
+    if (!nested || typeof nested !== "object") continue;
+    for (var sideIndex = 0; sideIndex < nestedSideKeys.length; sideIndex += 1) {
+      var sideKey = nestedSideKeys[sideIndex];
+      if (nested[sideKey] !== "" && nested[sideKey] != null) return { found: true, value: nested[sideKey] };
+    }
+  }
+
+  return { found: false, value: null };
+}
+
+function normalizeScoreSearchText(value) {
+  return sanitizeProposalText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[–—]/g, "-")
+    .toLowerCase();
+}
+
+function scoreMatchToSettlementScore(match) {
+  return {
+    homeScore: normalizeProposalScore(match[1]),
+    awayScore: normalizeProposalScore(match[2]),
+  };
+}
+
+function hasNonRegulationResultReference(result) {
+  var text = normalizeScoreSearchText(result && result.summary);
+  return /(penalt|shootout|luan luu|hiep phu|extra time|aet|a\.e\.t\.|120\s*(phut|minutes?))/.test(text);
+}
+
+function extractSettlementScoreFromPenaltySummary(result) {
+  var text = normalizeScoreSearchText(result && result.summary);
+  if (!hasNonRegulationResultReference(result)) return null;
+
+  var scorePattern = "(\\d+)\\s*[-:]\\s*(\\d+)";
+  var regulationTimePattern = "(?:90|bu gio|stoppage|injury time|normal time|regulation|full time|thoi gian chinh thuc|gio chinh thuc)";
+  var patterns = [
+    new RegExp(scorePattern + "\\s*(?:draw|hoa)?[^0-9]{0,40}(?:sau|after)[^0-9]{0,30}" + regulationTimePattern),
+    new RegExp("(?:sau|after)[^0-9]{0,30}" + regulationTimePattern + "[^0-9]{0,40}" + scorePattern),
+    new RegExp(scorePattern + "[^0-9]{0,20}(?:draw|hoa)"),
+    new RegExp("(?:draw|hoa)[^0-9]{0,20}" + scorePattern),
+  ];
+
+  for (var index = 0; index < patterns.length; index += 1) {
+    var match = text.match(patterns[index]);
+    if (match) return scoreMatchToSettlementScore(match);
+  }
+
+  return null;
+}
+
+function normalizeAiSettlementScores(result) {
+  var homeExplicit = findExplicitProposalScore(
+    result,
+    [
+      "homeScoreAfterRegulation",
+      "homeScoreAtFullTime",
+      "fullTimeHomeScore",
+      "homeFullTimeScore",
+      "homeScoreAfter90",
+      "homeScore90",
+      "homeScoreAfterStoppage",
+      "settlementHomeScore",
+      "homeScoreForSettlement",
+      "bettingHomeScore",
+      "homeScoreForBetting",
+    ],
+    ["homeScore", "home"]
+  );
+  var awayExplicit = findExplicitProposalScore(
+    result,
+    [
+      "awayScoreAfterRegulation",
+      "awayScoreAtFullTime",
+      "fullTimeAwayScore",
+      "awayFullTimeScore",
+      "awayScoreAfter90",
+      "awayScore90",
+      "awayScoreAfterStoppage",
+      "settlementAwayScore",
+      "awayScoreForSettlement",
+      "bettingAwayScore",
+      "awayScoreForBetting",
+    ],
+    ["awayScore", "away"]
+  );
+
+  if (homeExplicit.found || awayExplicit.found) {
+    if (!homeExplicit.found || !awayExplicit.found) throw new Error("AI result proposal has partial score");
+    return {
+      homeScore: normalizeProposalScore(homeExplicit.value),
+      awayScore: normalizeProposalScore(awayExplicit.value),
+    };
+  }
+
+  var summaryScore = extractSettlementScoreFromPenaltySummary(result);
+  if (summaryScore) return summaryScore;
+  if (hasNonRegulationResultReference(result)) {
+    return {
+      homeScore: null,
+      awayScore: null,
+    };
+  }
+
+  return {
+    homeScore: normalizeProposalScore(result && result.homeScore),
+    awayScore: normalizeProposalScore(result && result.awayScore),
+  };
 }
 
 function normalizeAiResultProposal(result) {
@@ -784,11 +949,12 @@ function normalizeAiResultProposal(result) {
     UNKNOWN: "UNKNOWN",
   };
   var status = statusMap[rawStatus] || "UNKNOWN";
-  var homeScore = normalizeProposalScore(result && result.homeScore);
-  var awayScore = normalizeProposalScore(result && result.awayScore);
+  var settlementScores = normalizeAiSettlementScores(result || {});
+  var homeScore = settlementScores.homeScore;
+  var awayScore = settlementScores.awayScore;
 
   if ((homeScore == null) !== (awayScore == null)) throw new Error("AI result proposal has partial score");
-  if (status === "FINISHED" && (homeScore == null || awayScore == null)) throw new Error("AI result proposal missing final score");
+  if (status === "FINISHED" && (homeScore == null || awayScore == null)) throw new Error("AI result proposal missing settlement score");
 
   return {
     status: status,
@@ -842,13 +1008,13 @@ function formatAdminResultProposal(match, proposal) {
   var normalized = normalizeAiResultProposal(proposal || {});
   var scoreText = hasProposalScore(normalized)
     ? sideName(match, SELECTIONS.HOME) + " " + normalized.homeScore + "-" + normalized.awayScore + " " + sideName(match, SELECTIONS.AWAY)
-    : "chưa có tỉ số final đủ rõ";
+    : "chưa có tỉ số tính kèo đủ rõ";
   var sourceLines = normalized.sources.length
     ? normalized.sources.map(function (source) { return "- " + source; })
     : ["- Chưa có link public đủ rõ."];
   var actionLine = hasProposalScore(normalized)
-    ? "Bấm Y để ghi kết quả này và settle tự động."
-    : "Không có tỉ số đủ rõ để confirm; bấm N rồi nhập tay bằng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;>";
+    ? "Bấm Y để ghi tỉ số tính kèo này và settle tự động."
+    : "Không có tỉ số tính kèo đủ rõ để confirm; bấm N rồi nhập tay bằng /result " + match.matchId + " <home-away sau 90' + bù giờ, không hiệp phụ/luân lưu> <diễn biến; cách nhau bằng dấu ;>";
   var instructionLine = hasProposalScore(normalized)
     ? "Admin verify link nguồn rồi bấm Y để confirm và tự settle, hoặc N để bỏ qua."
     : "Admin verify link nguồn; đề xuất chưa có tỉ số đủ rõ nên bấm N rồi nhập tay nếu cần.";
@@ -856,7 +1022,7 @@ function formatAdminResultProposal(match, proposal) {
   return [
     "🔎 Đề xuất AI/search cho " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY),
     "Trạng thái: " + formatResultProposalStatus(normalized.status),
-    "Tỉ số: " + scoreText,
+    "Tỉ số tính kèo (90' + bù giờ, không hiệp phụ/luân lưu): " + scoreText,
     "Tóm tắt: " + normalized.summary,
     "Nguồn để verify:",
     sourceLines.join("\n"),
@@ -1647,6 +1813,7 @@ if (typeof module !== "undefined") {
     buildResultProposalPatch: buildResultProposalPatch,
     buildConfirmOddsProposalPatch: buildConfirmOddsProposalPatch,
     buildConfirmResultProposalPatch: buildConfirmResultProposalPatch,
+    buildResetSettlementPatch: buildResetSettlementPatch,
     buildFallbackDryRunResult: buildFallbackDryRunResult,
     normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
     normalizeDryRunResult: normalizeDryRunResult,
@@ -1671,6 +1838,7 @@ if (typeof module !== "undefined") {
     getDryRunFinishTime: getDryRunFinishTime,
     getDryRunMatchesToFinish: getDryRunMatchesToFinish,
     getHandicapOutcome: getHandicapOutcome,
+    getLatestSettledMatch: getLatestSettledMatch,
     getSchedulerActions: getSchedulerActions,
     getTelegramUpdateDedupeKey: getTelegramUpdateDedupeKey,
     isPrivateTelegramChat: isPrivateTelegramChat,

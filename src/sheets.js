@@ -358,6 +358,26 @@ function appendScoreRows(rows) {
   });
 }
 
+function removeScoreRowsForMatch(matchId, actor) {
+  var sheet = ensureSheet(SHEETS.SCORES);
+  var headers = SHEET_HEADERS[SHEETS.SCORES];
+  ensureHeaders(sheet, headers);
+  var values = sheet.getDataRange().getValues();
+  var matchIdColumn = headers.indexOf("matchId");
+  var removed = 0;
+
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    if (String(values[rowIndex][matchIdColumn]) !== String(matchId)) continue;
+    sheet.getRange(rowIndex + 1, 1, 1, sheet.getMaxColumns()).clearContent();
+    removed += 1;
+  }
+
+  if (removed > 0) {
+    audit("REMOVE_SCORE_ROWS_FOR_MATCH", "Match", matchId, actor || "system", { matchId: matchId }, { removedRows: removed });
+  }
+  return removed;
+}
+
 function getLeaderboard() {
   var playersById = {};
   readObjects(SHEETS.PLAYERS).forEach(function (player) {

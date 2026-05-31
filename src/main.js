@@ -120,6 +120,7 @@ function handleMessage(message) {
   if (command.name === "ai_result") return adminAiResult(chatId, message.from.id, command.args);
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
   if (command.name === "settle") return settleMatch(command.args[0], message.from.id, chatId);
+  if (command.name === "reset_latest_settle" || command.name === "reset_settle_latest") return adminResetLatestSettle(chatId, message.from.id);
   if (command.name === "recap") return resendRecap(command.args[0], chatId);
 }
 
@@ -365,7 +366,7 @@ function handleResultProposalCallback(callbackQuery, data, admin) {
       "REJECT_RESULT_PROPOSAL"
     );
     answerCallbackQuery(callbackQuery.id, "Đã reject đề xuất.");
-    sendTelegramMessage(chatId, "Đã reject đề xuất cho " + match.matchId + ". Nếu cần, nhập tay bằng /result " + match.matchId + " <home-away> <diễn biến>.");
+    sendTelegramMessage(chatId, "Đã reject đề xuất cho " + match.matchId + ". Nếu cần, nhập tay bằng /result " + match.matchId + " <home-away sau 90' + bù giờ, không hiệp phụ/luân lưu> <diễn biến>.");
     return;
   }
 
@@ -376,7 +377,7 @@ function handleResultProposalCallback(callbackQuery, data, admin) {
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
     answerCallbackQuery(callbackQuery.id, "Không confirm được đề xuất.");
-    sendTelegramMessage(chatId, "Không confirm được đề xuất cho " + match.matchId + ". Hãy nhập tay bằng /result " + match.matchId + " <home-away> <diễn biến>.");
+    sendTelegramMessage(chatId, "Không confirm được đề xuất cho " + match.matchId + ". Hãy nhập tay bằng /result " + match.matchId + " <home-away sau 90' + bù giờ, không hiệp phụ/luân lưu> <diễn biến>.");
   }
 }
 
@@ -704,6 +705,14 @@ function promptResult(match, replyChatId, actor) {
   updateMatch(match.matchId, { adminResultPromptedAt: new Date().toISOString() }, source, "PROMPT_RESULT");
   var text;
   var keyboard;
+  if (hasStoredResultProposal(match)) {
+    var storedProposal = buildStoredResultProposal(match);
+    text = formatAdminResultProposal(match, storedProposal);
+    keyboard = buildResultProposalConfirmKeyboard(match.matchId, storedProposal);
+    if (replyChatId) sendTelegramMessage(replyChatId, text, keyboard);
+    else sendToAdmins(text, keyboard);
+    return;
+  }
   try {
     var proposal = generateAiResultProposal(match);
     updateMatch(match.matchId, buildResultProposalPatch(proposal), source, "STORE_RESULT_PROPOSAL");
@@ -711,10 +720,29 @@ function promptResult(match, replyChatId, actor) {
     keyboard = buildResultProposalConfirmKeyboard(match.matchId, proposal);
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
-    text = "🔎 Cần xác nhận kết quả " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Dùng /result " + match.matchId + " <home-away> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".";
+    text = "🔎 Cần xác nhận tỉ số tính kèo " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + ". Dùng /result " + match.matchId + " <home-away sau 90' + bù giờ, không hiệp phụ/luân lưu> <diễn biến; cách nhau bằng dấu ;> rồi /settle " + match.matchId + ".";
   }
   if (replyChatId) sendTelegramMessage(replyChatId, text, keyboard);
   else sendToAdmins(text, keyboard);
+}
+
+function hasStoredResultProposal(match) {
+  return Boolean(match && match.resultProposalStatus && String(match.resultProposalDecision || "").toUpperCase() !== "REJECTED");
+}
+
+function buildStoredResultProposal(match) {
+  return {
+    status: match.resultProposalStatus,
+    homeScore: match.resultProposalHomeScore,
+    awayScore: match.resultProposalAwayScore,
+    summary: match.resultProposalSummary,
+    sources: String(match.resultProposalSources || "")
+      .split(/\n+/)
+      .map(function (source) {
+        return source.trim();
+      })
+      .filter(Boolean),
+  };
 }
 
 function adminAiResult(chatId, actor, args) {
@@ -741,7 +769,7 @@ function adminSetResult(chatId, actor, args) {
   var homeScore = Number(scoreParts[0]);
   var awayScore = Number(scoreParts[1]);
   if (!matchId || scoreParts.length !== 2 || !isFinite(homeScore) || !isFinite(awayScore)) {
-    sendTelegramMessage(chatId, "Cú pháp: /result <matchId> <home-away> <diễn biến; cách nhau bằng dấu ;>");
+    sendTelegramMessage(chatId, "Cú pháp: /result <matchId> <home-away sau 90' + bù giờ, không hiệp phụ/luân lưu> <diễn biến; cách nhau bằng dấu ;>");
     return;
   }
   updateMatch(
@@ -754,7 +782,7 @@ function adminSetResult(chatId, actor, args) {
     actor,
     "SET_RESULT"
   );
-  sendTelegramMessage(chatId, "Đã ghi kết quả " + matchId + ": " + homeScore + "-" + awayScore + ".");
+  sendTelegramMessage(chatId, "Đã ghi tỉ số tính kèo " + matchId + ": " + homeScore + "-" + awayScore + ".");
 }
 
 function settleMatch(matchId, actor, replyChatId) {
@@ -764,7 +792,7 @@ function settleMatch(matchId, actor, replyChatId) {
     return;
   }
   if (match.finalHomeScore === "" || match.finalAwayScore === "") {
-    if (replyChatId) sendTelegramMessage(replyChatId, "Chưa có kết quả final.");
+    if (replyChatId) sendTelegramMessage(replyChatId, "Chưa có tỉ số tính kèo.");
     return;
   }
 
@@ -796,6 +824,21 @@ function settleMatch(matchId, actor, replyChatId) {
   var recap = buildAiRecapOrFallback(matchId);
   sendRecapToConfiguredChats(recap);
   if (replyChatId) sendTelegramMessage(replyChatId, "Đã settle và gửi recap cho " + matchId + ".");
+}
+
+function adminResetLatestSettle(chatId, actor) {
+  var match = getLatestSettledMatch(getMatches());
+  if (!match) {
+    sendTelegramMessage(chatId, "Không tìm thấy trận đã settle để reset.");
+    return;
+  }
+
+  var removedRows = removeScoreRowsForMatch(match.matchId, actor);
+  updateMatch(match.matchId, buildResetSettlementPatch(), actor, "RESET_LATEST_SETTLE");
+  sendTelegramMessage(
+    chatId,
+    "Đã reset settle trận " + match.matchId + ": xóa " + removedRows + " score rows, đưa trận về LOCKED. Leaderboard đã tính lại từ Scores còn lại."
+  );
 }
 
 function buildAiRecapOrFallback(matchId) {

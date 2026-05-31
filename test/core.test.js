@@ -52,10 +52,12 @@ const {
   buildResultProposalPatch,
   buildConfirmOddsProposalPatch,
   buildConfirmResultProposalPatch,
+  buildResetSettlementPatch,
   normalizeDryRunMatchesForOrchestration,
   normalizeDryRunResult,
   normalizeAiResultProposal,
   normalizeAiOddsProposal,
+  getLatestSettledMatch,
   parseCallbackData,
   parseTelegramCommand,
   getDryRunFinishTime,
@@ -101,7 +103,7 @@ test("scores group-stage picks after applying handicap", () => {
     homeTeam: "Brazil",
     awayTeam: "Japan",
     handicapSide: SELECTIONS.HOME,
-    handicapGoals: -0.5,
+    handicapGoals: 0.5,
   };
   const score = { homeScore: 1, awayScore: 1 };
 
@@ -113,6 +115,29 @@ test("scores group-stage picks after applying handicap", () => {
   assert.deepEqual(scorePick(match, { selection: SELECTIONS.HOME, star: false }, score), {
     correct: false,
     points: 0,
+    outcome: SELECTIONS.AWAY,
+  });
+});
+
+test("scores a draw as underdog win when favorite gives a positive handicap", () => {
+  const match = {
+    matchId: "UCL-FINAL",
+    stage: "KNOCKOUT",
+    homeTeam: "Paris Saint-Germain",
+    awayTeam: "Arsenal",
+    handicapSide: SELECTIONS.HOME,
+    handicapGoals: 0.75,
+  };
+  const score = { homeScore: 1, awayScore: 1 };
+
+  assert.deepEqual(scorePick(match, { selection: SELECTIONS.AWAY, star: false }, score), {
+    correct: true,
+    points: 1,
+    outcome: SELECTIONS.AWAY,
+  });
+  assert.deepEqual(scorePick(match, { selection: SELECTIONS.HOME, star: true }, score), {
+    correct: false,
+    points: -1,
     outcome: SELECTIONS.AWAY,
   });
 });
@@ -476,9 +501,39 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/set_odds/);
   assert.match(adminCommands, /\/lock_summary <matchId>/);
   assert.match(adminCommands, /\/ai_result <matchId>/);
+  assert.match(adminCommands, /\/reset_latest_settle/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
   assert.match(adminCommands, /đề xuất kết quả/);
+});
+
+test("selects latest settled match and builds reset settlement patch", () => {
+  const latest = getLatestSettledMatch([
+    {
+      matchId: "OLD",
+      status: STATUSES.SETTLED,
+      kickoffUtc: "2026-06-12T18:00:00.000Z",
+      settledAt: "2026-06-12T21:00:00.000Z",
+    },
+    {
+      matchId: "OPEN",
+      status: STATUSES.LOCKED,
+      kickoffUtc: "2026-06-13T18:00:00.000Z",
+    },
+    {
+      matchId: "NEW",
+      status: STATUSES.SETTLED,
+      kickoffUtc: "2026-06-14T18:00:00.000Z",
+      settledAt: "2026-06-14T21:00:00.000Z",
+    },
+  ]);
+
+  assert.equal(latest.matchId, "NEW");
+  assert.deepEqual(buildResetSettlementPatch(), {
+    status: STATUSES.LOCKED,
+    handicapOutcome: "",
+    settledAt: "",
+  });
 });
 
 test("allows resending lock summaries only after picks are final", () => {
@@ -1028,6 +1083,8 @@ test("builds AI result proposal prompt for admin confirmation", () => {
 
   assert.match(prompt, /1-2 nguồn public/);
   assert.match(prompt, /web search như Google/);
+  assert.match(prompt, /90 phút \+ bù giờ/);
+  assert.match(prompt, /KHÔNG tính 2 hiệp phụ hoặc loạt luân lưu/);
   assert.match(prompt, /JSON/);
   assert.match(prompt, /không bịa/i);
   assert.match(prompt, /admin confirm/);
@@ -1065,8 +1122,81 @@ test("normalizes and formats AI result proposal for admin verification", () => {
   assert.match(message, /https:\/\/www\.fifa\.com\/match-centre\/m001/);
   assert.match(message, /https:\/\/www\.bbc\.com\/sport\/football\/m001/);
   assert.match(message, /bấm Y để confirm và tự settle/);
-  assert.match(message, /Bấm Y để ghi kết quả này và settle tự động/);
+  assert.match(message, /Tỉ số tính kèo/);
+  assert.match(message, /Bấm Y để ghi tỉ số tính kèo này và settle tự động/);
   assert.doesNotMatch(message, /\/result M001 2-1/);
+});
+
+test("normalizes AI result proposal with regulation-time score instead of extra-time or shootout score", () => {
+  const proposal = normalizeAiResultProposal({
+    status: "finished",
+    homeScore: 4,
+    awayScore: 3,
+    homeScoreAfterRegulation: 1,
+    awayScoreAfterRegulation: 1,
+    homeScoreAfterExtraTime: 2,
+    awayScoreAfterExtraTime: 1,
+    summary: "PSG won 4-3 on penalties after a 2-1 extra-time win, with the match 1-1 after 90 minutes.",
+    sources: ["https://www.uefa.com/match-centre/m001"],
+  });
+
+  assert.deepEqual(proposal, {
+    status: "FINISHED",
+    homeScore: 1,
+    awayScore: 1,
+    summary: "PSG won 4-3 on penalties after a 2-1 extra-time win, with the match 1-1 after 90 minutes.",
+    sources: ["https://www.uefa.com/match-centre/m001"],
+  });
+});
+
+test("normalizes AI result proposal from regulation-time summary when generic score is shootout score", () => {
+  const proposal = normalizeAiResultProposal({
+    status: "finished",
+    homeScore: 4,
+    awayScore: 3,
+    summary: "Kết thúc kịch tính: 1-1 sau 90 phút + bù giờ, PSG dẫn 2-1 sau hiệp phụ, rồi thắng 4-3 ở loạt luân lưu.",
+    sources: ["https://www.uefa.com/match-centre/m001"],
+  });
+
+  assert.deepEqual(proposal, {
+    status: "FINISHED",
+    homeScore: 1,
+    awayScore: 1,
+    summary: "Kết thúc kịch tính: 1-1 sau 90 phút + bù giờ, PSG dẫn 2-1 sau hiệp phụ, rồi thắng 4-3 ở loạt luân lưu.",
+    sources: ["https://www.uefa.com/match-centre/m001"],
+  });
+});
+
+test("normalizes AI result proposal from parenthetical extra-time summary", () => {
+  const proposal = normalizeAiResultProposal({
+    status: "finished",
+    homeScore: 4,
+    awayScore: 3,
+    summary: "Hòa 1-1 sau 90 phút (1-1 cũng sau hiệp phụ); Paris Saint-Germain thắng 4-3 trên chấm luân lưu.",
+    sources: ["https://www.uefa.com/match-centre/m001"],
+  });
+
+  assert.deepEqual(proposal, {
+    status: "FINISHED",
+    homeScore: 1,
+    awayScore: 1,
+    summary: "Hòa 1-1 sau 90 phút (1-1 cũng sau hiệp phụ); Paris Saint-Germain thắng 4-3 trên chấm luân lưu.",
+    sources: ["https://www.uefa.com/match-centre/m001"],
+  });
+});
+
+test("rejects shootout-like AI result proposal without clear regulation-time score", () => {
+  assert.throws(
+    () =>
+      normalizeAiResultProposal({
+        status: "finished",
+        homeScore: 4,
+        awayScore: 3,
+        summary: "PSG thắng 4-3 ở loạt luân lưu sau 120 phút.",
+        sources: ["https://www.uefa.com/match-centre/m001"],
+      }),
+    /missing settlement score/
+  );
 });
 
 test("builds result proposal patch and confirm keyboard", () => {

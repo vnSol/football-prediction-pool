@@ -11,8 +11,9 @@ This strategy covers the T+120 result proposal flow:
 ## Goals
 
 - Admin verifies sources, then taps Y to confirm and auto-settle, or taps N to reject.
-- Bot writes production final scores only after an admin taps Y on a stored proposal.
-- T+120 proposals include status, score when clear, short summary, and source links for real matches.
+- Bot writes production settlement scores only after an admin taps Y on a stored proposal.
+- T+120 proposals include status, settlement score when clear, short summary, and source links for real matches.
+- Settlement score means 90 minutes plus stoppage time, excluding extra time and penalty shootouts.
 - Dry-run can exercise the admin-confirm workflow without depending on real public match sources.
 
 ## Automated Tests
@@ -31,11 +32,11 @@ node --check src/main.js
 
 Coverage focus:
 
-- Scheduler emits `PROMPT_RESULT` at T+120 only for locked matches without final score.
+- Scheduler emits `PROMPT_RESULT` at T+120 only for locked matches without settlement score.
 - AI result proposal prompt requires 1-2 public sources and JSON output.
 - Proposal normalization rejects partial scores and filters invalid source URLs.
 - Admin proposal formatting includes source links and Y/N confirm controls.
-- Proposal patches persist proposed score, summary, sources, and decision fields separately from final result fields.
+- Proposal patches persist proposed settlement score, summary, sources, and decision fields separately from final result fields.
 - Confirm patch copies the stored proposal into final result fields before settlement.
 - Dry-run result proposal is synthetic, has no public source links, and settles only after Y confirmation.
 - Command help describes `/dryrun_finish` as a T+120 proposal step with button confirmation.
@@ -49,7 +50,7 @@ Coverage focus:
 5. Confirm the bot sends one proposal per unsettled `DRY-` match.
 6. Tap N on one proposal and confirm the match is not settled.
 7. Tap Y on one proposal.
-8. Confirm the bot writes the proposed final score, settles the match, and sends recap.
+8. Confirm the bot writes the proposed settlement score, settles the match, and sends recap.
 
 ## Production Smoke Check
 
