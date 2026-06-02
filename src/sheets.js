@@ -8,6 +8,8 @@ var SHEETS = Object.freeze({
 });
 
 var SHEET_HEADERS = {};
+var AI_MATCH_PROPOSAL_CACHE_PREFIX = "ai_match_proposal:";
+
 SHEET_HEADERS[SHEETS.PLAYERS] = ["telegramUserId", "displayName", "active", "isAdmin"];
 SHEET_HEADERS[SHEETS.MATCHES] = [
   "matchId",
@@ -180,6 +182,19 @@ function appendMatches(matches, actor) {
     else skipped.push(match.matchId);
   });
   return { created: created, skipped: skipped };
+}
+
+function saveAiMatchProposal(proposal) {
+  CacheService.getScriptCache().put(AI_MATCH_PROPOSAL_CACHE_PREFIX + proposal.requestId, JSON.stringify(proposal), 21600);
+}
+
+function getAiMatchProposal(requestId) {
+  var text = CacheService.getScriptCache().get(AI_MATCH_PROPOSAL_CACHE_PREFIX + requestId);
+  return text ? JSON.parse(text) : null;
+}
+
+function deleteAiMatchProposal(requestId) {
+  CacheService.getScriptCache().remove(AI_MATCH_PROPOSAL_CACHE_PREFIX + requestId);
 }
 
 function upsertDryRunMatches(matches, actor) {

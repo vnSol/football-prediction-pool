@@ -532,6 +532,7 @@ function formatCommands(isAdmin) {
       "/open <matchId> - Mở pick thủ công",
       "/lock <matchId> - Khóa pick thủ công",
       "/lock_summary <matchId> - Gửi lại AI pick đã chốt",
+      "/ai_matches <prompt> - AI/search tìm lịch trận theo yêu cầu, gửi danh sách để admin chọn và submit vào Matches",
       "/ai_result <matchId> - AI tìm tỉ số tính kèo, gửi đề xuất Y/N; confirm thì settle và recap",
       "/result <matchId> <home-away> <diễn biến> - Nhập tỉ số tính kèo sau 90' + bù giờ, không hiệp phụ/luân lưu",
       "/settle <matchId> - Chốt điểm",
@@ -986,6 +987,241 @@ function normalizeProposalSources(sources, limit) {
 
 function sanitizeProposalText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function buildAiMatchesPrompt(adminPrompt, existingMatches) {
+  var lines = [
+    "Bạn là trợ lý vận hành cho game dự đoán bóng đá nội bộ.",
+    "Hãy dùng web search để tìm danh sách trận đấu phù hợp đúng yêu cầu của admin.",
+    "Ưu tiên nguồn chính thống/có uy tín như FIFA, AFC, UEFA, CONMEBOL, CONCACAF, CAF, OFC, ESPN, BBC, Reuters hoặc AP.",
+    "Không đề xuất lại các trận đã có trong danh sách loại trừ bên dưới, kể cả khi nguồn dùng tên đội tương đương như USA và United States.",
+    "Không bịa trận, đội, giờ đá hoặc nguồn. Nếu không tìm được trận phù hợp, trả về matches là mảng rỗng.",
+    "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
+    "",
+    "Yêu cầu admin:",
+    sanitizeProposalText(adminPrompt),
+    "",
+  ];
+
+  var exclusionLines = formatExistingAiMatchExclusionLines(existingMatches);
+  if (exclusionLines.length) {
+    lines = lines.concat([
+      "Không đề xuất lại các trận đã có:",
+      exclusionLines.join("\n"),
+      "",
+    ]);
+  }
+
+  return lines.concat([
+    "Schema:",
+    '{ "matches": [{ "matchId": "chuỗi ngắn nếu nguồn có, có thể bỏ trống", "homeTeam": "tên đội nhà", "awayTeam": "tên đội khách", "kickoffUtc": "ISO 8601 UTC", "stage": "GROUP|KNOCKOUT", "sources": ["https://..."] }] }',
+    "",
+    "Quy ước:",
+    "- kickoffUtc phải là giờ bắt đầu trận ở UTC.",
+    "- stage dùng GROUP cho vòng bảng/vòng loại/league format; dùng KNOCKOUT cho playoff, loại trực tiếp hoặc chung kết.",
+    "- sources chỉ gồm URL public dùng để verify trận đó.",
+    "- Chỉ trả tối đa 10 trận phù hợp nhất.",
+  ]).join("\n");
+}
+
+function formatExistingAiMatchExclusionLines(existingMatches) {
+  return (existingMatches || []).slice(0, 80).map(function (match) {
+    return [
+      "- " +
+        match.matchId +
+        ": " +
+        sideName(match, SELECTIONS.HOME) +
+        " vs " +
+        sideName(match, SELECTIONS.AWAY),
+      "kickoffUtc=" + toIso(match.kickoffUtc),
+    ].join(" | ");
+  });
+}
+
+function normalizeAiMatchProposals(result) {
+  var rawMatches = Array.isArray(result) ? result : result && (result.matches || result.fixtures || result.games);
+  if (!Array.isArray(rawMatches)) return [];
+
+  return rawMatches
+    .map(function (match) {
+      try {
+        return normalizeAiMatchProposal(match);
+      } catch (error) {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function normalizeAiMatchProposal(match) {
+  var homeTeam = normalizeTeamName(match && (match.homeTeam || match.home || match.teamHome));
+  var awayTeam = normalizeTeamName(match && (match.awayTeam || match.away || match.teamAway));
+  var kickoffUtc = match && (match.kickoffUtc || match.kickoff || match.startTime || match.dateTimeUtc);
+  var kickoff = toDate(kickoffUtc);
+  if (!homeTeam || !awayTeam || Number.isNaN(kickoff.getTime())) throw new Error("AI match proposal missing required fields");
+
+  return {
+    matchId: normalizeAiMatchId(homeTeam, awayTeam, kickoff, match && match.category),
+    homeTeam: homeTeam,
+    awayTeam: awayTeam,
+    kickoffUtc: kickoff.toISOString(),
+    stage: normalizeAiMatchStage(match && (match.stage || match.round || match.phase)),
+    status: STATUSES.SCHEDULED,
+    sources: normalizeProposalSources(match && (match.sources || match.sourceUrls || match.links), 3),
+  };
+}
+
+function filterNewAiMatchProposals(matches, existingMatches) {
+  var existingById = {};
+  var existingByFixture = {};
+  (existingMatches || []).forEach(function (match) {
+    existingById[String(match.matchId || "").toUpperCase()] = true;
+    existingByFixture[buildFixtureFingerprint(match)] = true;
+  });
+  return (matches || []).filter(function (match) {
+    return !existingById[String(match.matchId || "").toUpperCase()] && !existingByFixture[buildFixtureFingerprint(match)];
+  });
+}
+
+function buildFixtureFingerprint(match) {
+  var kickoff = toDate(match && match.kickoffUtc);
+  var teams = [
+    normalizeFixtureTeamKey(match && match.homeTeam),
+    normalizeFixtureTeamKey(match && match.awayTeam),
+  ].sort();
+  return [Number.isNaN(kickoff.getTime()) ? "" : kickoff.toISOString(), teams[0], teams[1]].join("|");
+}
+
+function normalizeFixtureTeamKey(value) {
+  var key = normalizeTeamFlagKey(value);
+  return TEAM_FLAG_CODES[key] || key;
+}
+
+function normalizeAiMatchStage(value) {
+  var stage = String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  if (stage.indexOf("KNOCKOUT") !== -1 || stage.indexOf("PLAYOFF") !== -1 || stage.indexOf("PLAY_OFF") !== -1 || stage.indexOf("FINAL") !== -1) {
+    return "KNOCKOUT";
+  }
+  return "GROUP";
+}
+
+function normalizeAiMatchId(homeTeam, awayTeam, kickoff, category) {
+  var timestamp = [
+    kickoff.getUTCFullYear(),
+    pad2(kickoff.getUTCMonth() + 1),
+    pad2(kickoff.getUTCDate()),
+    pad2(kickoff.getUTCHours()),
+    pad2(kickoff.getUTCMinutes()),
+    pad2(kickoff.getUTCSeconds()),
+  ].join("");
+  return normalizeAiMatchCategory(category) + "_" + timestamp + "_" + screamingSnakeTeamId(homeTeam) + "-" + screamingSnakeTeamId(awayTeam);
+}
+
+function normalizeAiMatchCategory(value) {
+  var category = String(value || "WCQ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "")
+    .slice(0, 3);
+  return category || "WCQ";
+}
+
+function screamingSnakeTeamId(value) {
+  var slug = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || "TEAM";
+}
+
+function buildAiMatchProposalRequestId(now) {
+  var base = toDate(now || new Date()).getTime().toString(36).toUpperCase();
+  var suffix = Math.floor(Math.random() * 46656).toString(36).toUpperCase();
+  return ("AM" + base + suffix).slice(0, 24);
+}
+
+function buildAiMatchProposal(requestId, prompt, matches, now) {
+  var items = (matches || []).slice(0, 10);
+  return {
+    requestId: String(requestId || buildAiMatchProposalRequestId(now)),
+    prompt: sanitizeProposalText(prompt),
+    createdAt: toIso(now || new Date()),
+    matches: items,
+    selected: items.map(function () { return true; }),
+  };
+}
+
+function toggleAiMatchProposalSelection(proposal, index) {
+  var selected = (proposal.selected || []).slice();
+  var parsedIndex = Number(index);
+  if (!Number.isInteger(parsedIndex) || parsedIndex < 0 || parsedIndex >= (proposal.matches || []).length) return proposal;
+  selected[parsedIndex] = !selected[parsedIndex];
+  return Object.assign({}, proposal, { selected: selected });
+}
+
+function getSelectedAiMatchProposalMatches(proposal) {
+  return (proposal.matches || []).filter(function (match, index) {
+    return Boolean((proposal.selected || [])[index]);
+  });
+}
+
+function formatAiMatchProposalMessage(proposal) {
+  var lines = [
+    "🗓️ Đề xuất lịch trận AI/search",
+    "Yêu cầu: " + sanitizeProposalText(proposal.prompt),
+    "Chọn trận muốn ghi vào Matches rồi Submit.",
+    "",
+  ];
+
+  (proposal.matches || []).forEach(function (match, index) {
+    var checked = (proposal.selected || [])[index] ? "[x]" : "[ ]";
+    var sources = (match.sources || []).length ? " | Nguồn: " + match.sources.join(", ") : "";
+    lines.push(
+      checked +
+        " " +
+        match.matchId +
+        ": " +
+        sideDisplayName(match, SELECTIONS.HOME) +
+        " vs " +
+        sideDisplayName(match, SELECTIONS.AWAY) +
+        " | " +
+        formatKickoffTime(match.kickoffUtc) +
+        " | " +
+        match.stage +
+        sources
+    );
+  });
+
+  return lines.join("\n");
+}
+
+function buildAiMatchProposalKeyboard(proposal) {
+  var rows = (proposal.matches || []).map(function (match, index) {
+    var checked = (proposal.selected || [])[index] ? "[x]" : "[ ]";
+    return [
+      {
+        text: checked + " " + match.matchId,
+        callback_data: "match_toggle|" + proposal.requestId + "|" + index,
+      },
+    ];
+  });
+  rows.push([
+    { text: "Submit selected", callback_data: "match_submit|" + proposal.requestId + "|" },
+    { text: "Cancel", callback_data: "match_cancel|" + proposal.requestId + "|" },
+  ]);
+  return { inline_keyboard: rows };
+}
+
+function formatAiMatchSubmitResult(result) {
+  return [
+    "Đã ghi các trận được chọn vào Matches.",
+    "Created: " + (result.created && result.created.length ? result.created.join(", ") : "none"),
+    "Skipped existing: " + (result.skipped && result.skipped.length ? result.skipped.join(", ") : "none"),
+  ].join("\n");
 }
 
 function hasProposalScore(proposal) {
@@ -1794,10 +2030,14 @@ if (typeof module !== "undefined") {
     canSetOdds: canSetOdds,
     buildPickKeyboard: buildPickKeyboard,
     buildAiOddsProposalPrompt: buildAiOddsProposalPrompt,
+    buildAiMatchesPrompt: buildAiMatchesPrompt,
     buildAiRecapPrompt: buildAiRecapPrompt,
     buildAiResultProposalPrompt: buildAiResultProposalPrompt,
     buildLockDramaPrompt: buildLockDramaPrompt,
     buildLockedBettingFacts: buildLockedBettingFacts,
+    buildAiMatchProposal: buildAiMatchProposal,
+    buildAiMatchProposalKeyboard: buildAiMatchProposalKeyboard,
+    buildAiMatchProposalRequestId: buildAiMatchProposalRequestId,
     formatLockedPickSummary: formatLockedPickSummary,
     createDefaultPicks: createDefaultPicks,
     buildDryRunMatches: buildDryRunMatches,
@@ -1817,8 +2057,12 @@ if (typeof module !== "undefined") {
     buildFallbackDryRunResult: buildFallbackDryRunResult,
     normalizeDryRunMatchesForOrchestration: normalizeDryRunMatchesForOrchestration,
     normalizeDryRunResult: normalizeDryRunResult,
+    normalizeAiMatchProposals: normalizeAiMatchProposals,
     normalizeAiOddsProposal: normalizeAiOddsProposal,
     normalizeAiResultProposal: normalizeAiResultProposal,
+    formatAiMatchProposalMessage: formatAiMatchProposalMessage,
+    formatAiMatchSubmitResult: formatAiMatchSubmitResult,
+    filterNewAiMatchProposals: filterNewAiMatchProposals,
     formatHandicap: formatHandicap,
     formatCommands: formatCommands,
     formatAdminOddsProposal: formatAdminOddsProposal,
@@ -1863,5 +2107,7 @@ if (typeof module !== "undefined") {
     sortLeaderboard: sortLeaderboard,
     teamDisplayName: teamDisplayName,
     teamFlagEmoji: teamFlagEmoji,
+    getSelectedAiMatchProposalMatches: getSelectedAiMatchProposalMatches,
+    toggleAiMatchProposalSelection: toggleAiMatchProposalSelection,
   };
 }

@@ -12,16 +12,28 @@ function loadMainContext(overrides) {
       console,
       STATUSES: { LOCKED: "LOCKED", SETTLED: "SETTLED" },
       canSendLockSummary: (match) => Boolean(match && match.status === "LOCKED"),
+      getMatches: () => [],
       getMatchById: (matchId) => ({ matchId, status: "LOCKED" }),
       getPicks: () => [{ matchId: "M001", displayName: "An", selection: "HOME" }],
       generateAiLockMessage: () => "AI tổng hợp pick",
       generateAiResultProposal: () => ({ status: "FINISHED", homeScore: 2, awayScore: 1 }),
       formatLockedPickSummary: () => "📋 Pick đã chốt\n- Argentina: An",
       formatAdminResultProposal: () => "AI đề xuất kết quả",
+      formatAiMatchSubmitResult: (result) => [
+        "Đã ghi các trận được chọn vào Matches.",
+        "Created: " + (result.created.length ? result.created.join(", ") : "none"),
+        "Skipped existing: " + (result.skipped.length ? result.skipped.join(", ") : "none"),
+      ].join("\n"),
+      filterNewAiMatchProposals: (matches) => matches,
       buildFallbackLockMessage: () => "Fallback tổng hợp pick",
       buildResultProposalPatch: () => ({ resultProposalStatus: "FINISHED" }),
       buildResultProposalConfirmKeyboard: () => ({ inline_keyboard: [[{ text: "Y", callback_data: "result_confirm|M001|" }]] }),
       updateMatch: () => {},
+      editTelegramMessageText: (chatId, messageId, text, replyMarkup) => {
+        const message = { chatId, messageId, text };
+        if (replyMarkup) message.replyMarkup = replyMarkup;
+        sentMessages.push(message);
+      },
       sendRecapToConfiguredChats: (text) => recapMessages.push(text),
       sendTelegramMessage: (chatId, text, replyMarkup) => {
         const message = { chatId, text };
@@ -43,6 +55,124 @@ test("lock_summary sends the generated summary to the configured recap chat", ()
   assert.deepEqual(recapMessages, ["AI tổng hợp pick\n\n📋 Pick đã chốt\n- Argentina: An"]);
   assert.deepEqual(JSON.parse(JSON.stringify(sentMessages)), [
     { chatId: "-100123", text: "Đã gửi lại AI pick đã chốt cho M001 vào RECAP_CHAT_ID." },
+  ]);
+});
+
+test("ai_matches sends AI match proposals for admin selection", () => {
+  const saved = [];
+  const candidate = {
+    matchId: "WCQ-20260611-VIETNAM-INDONESIA",
+    homeTeam: "Vietnam",
+    awayTeam: "Indonesia",
+    kickoffUtc: "2026-06-11T05:00:00.000Z",
+    stage: "GROUP",
+    status: "SCHEDULED",
+    sources: ["https://www.fifa.com/example"],
+  };
+  const proposal = {
+    requestId: "REQ1",
+    prompt: "lấy các trận đấu vòng loại World cup 2026",
+    matches: [candidate],
+    selected: [true],
+  };
+  const { context, sentMessages } = loadMainContext({
+    getMatchById: () => null,
+    generateAiMatchProposals: () => [candidate],
+    buildAiMatchProposalRequestId: () => "REQ1",
+    buildAiMatchProposal: () => proposal,
+    saveAiMatchProposal: (value) => saved.push(value),
+    formatAiMatchProposalMessage: () => "AI đề xuất lịch trận",
+    buildAiMatchProposalKeyboard: () => ({ inline_keyboard: [[{ text: "[x] WCQ", callback_data: "match_toggle|REQ1|0" }]] }),
+  });
+
+  context.adminAiMatches("-100123", "42", ["lấy", "các", "trận", "đấu", "vòng", "loại", "World", "cup", "2026"]);
+
+  assert.deepEqual(saved, [proposal]);
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages)), [
+    {
+      chatId: "-100123",
+      text: "AI đề xuất lịch trận",
+      replyMarkup: { inline_keyboard: [[{ text: "[x] WCQ", callback_data: "match_toggle|REQ1|0" }]] },
+    },
+  ]);
+});
+
+test("ai_matches reports when AI finds no suitable matches", () => {
+  const { context, sentMessages } = loadMainContext({
+    generateAiMatchProposals: () => [],
+  });
+
+  context.adminAiMatches("-100123", "42", ["không", "có"]);
+
+  assert.deepEqual(sentMessages, [
+    {
+      chatId: "-100123",
+      text: "AI không tìm được trận nào phù hợp yêu cầu.",
+    },
+  ]);
+});
+
+test("AI match proposal callback toggles selection and edits the proposal message", () => {
+  const saved = [];
+  const proposal = { requestId: "REQ1", matches: [{ matchId: "M001" }], selected: [true] };
+  const nextProposal = { requestId: "REQ1", matches: [{ matchId: "M001" }], selected: [false] };
+  const { context, sentMessages } = loadMainContext({
+    getAiMatchProposal: () => proposal,
+    toggleAiMatchProposalSelection: () => nextProposal,
+    saveAiMatchProposal: (value) => saved.push(value),
+    formatAiMatchProposalMessage: () => "updated proposal",
+    buildAiMatchProposalKeyboard: () => ({ inline_keyboard: [[{ text: "[ ] M001", callback_data: "match_toggle|REQ1|0" }]] }),
+    answerCallbackQuery: (id, text) => sentMessages.push({ callbackId: id, text }),
+  });
+
+  context.handleAiMatchProposalCallback(
+    { id: "cb1", from: { id: "42" }, message: { chat: { id: "-100123" }, message_id: 7 } },
+    { action: "match_toggle", matchId: "REQ1", value: "0" },
+    true
+  );
+
+  assert.deepEqual(saved, [nextProposal]);
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages)), [
+    { callbackId: "cb1", text: "Đã cập nhật lựa chọn." },
+    {
+      chatId: "-100123",
+      messageId: 7,
+      text: "updated proposal",
+      replyMarkup: { inline_keyboard: [[{ text: "[ ] M001", callback_data: "match_toggle|REQ1|0" }]] },
+    },
+  ]);
+});
+
+test("AI match proposal callback submits selected matches to sheet", () => {
+  const appended = [];
+  const deleted = [];
+  const selected = [{ matchId: "M001", homeTeam: "Vietnam", awayTeam: "Indonesia", kickoffUtc: "2026-06-11T05:00:00.000Z", stage: "GROUP", status: "SCHEDULED" }];
+  const { context, sentMessages } = loadMainContext({
+    getAiMatchProposal: () => ({ requestId: "REQ1", matches: selected, selected: [true] }),
+    getSelectedAiMatchProposalMatches: () => selected,
+    appendMatches: (matches, actor) => {
+      appended.push({ matches, actor });
+      return { created: ["M001"], skipped: [] };
+    },
+    deleteAiMatchProposal: (requestId) => deleted.push(requestId),
+    answerCallbackQuery: (id, text) => sentMessages.push({ callbackId: id, text }),
+  });
+
+  context.handleAiMatchProposalCallback(
+    { id: "cb1", from: { id: "42" }, message: { chat: { id: "-100123" }, message_id: 7 } },
+    { action: "match_submit", matchId: "REQ1", value: "" },
+    true
+  );
+
+  assert.deepEqual(appended, [{ matches: selected, actor: "42" }]);
+  assert.deepEqual(deleted, ["REQ1"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages)), [
+    { callbackId: "cb1", text: "Đã ghi trận đã chọn." },
+    {
+      chatId: "-100123",
+      messageId: 7,
+      text: "Đã ghi các trận được chọn vào Matches.\nCreated: M001\nSkipped existing: none",
+    },
   ]);
 });
 

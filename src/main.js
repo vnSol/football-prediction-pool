@@ -110,6 +110,7 @@ function handleMessage(message) {
   if (command.name === "add_player") return adminAddPlayer(chatId, message.from.id, command.args);
   if (command.name === "set_player_active") return adminSetPlayerActive(chatId, message.from.id, command.args);
   if (command.name === "add_match") return adminAddMatch(chatId, message.from.id, command.args);
+  if (command.name === "ai_matches") return adminAiMatches(chatId, message.from.id, command.args);
   if (command.name === "set_match_time") return adminSetMatchTime(chatId, message.from.id, command.args);
   if (command.name === "reset_sheet") return adminResetSheet(chatId);
   if (command.name === "dryrun") return adminDryRun(chatId, message.from.id, command.args);
@@ -189,6 +190,33 @@ function adminAddMatch(chatId, actor, args) {
   sendTelegramMessage(chatId, "Đã thêm trận " + match.matchId + ": " + sideDisplayName(match, SELECTIONS.HOME) + " vs " + sideDisplayName(match, SELECTIONS.AWAY) + " lúc " + formatKickoffTime(match.kickoffUtc) + ".");
 }
 
+function adminAiMatches(chatId, actor, args) {
+  var prompt = (args || []).join(" ").trim();
+  if (!prompt) {
+    sendTelegramMessage(chatId, "Cú pháp: /ai_matches <prompt>");
+    return;
+  }
+
+  var existingMatches = getMatches();
+  var matches;
+  try {
+    matches = filterNewAiMatchProposals(generateAiMatchProposals(prompt, existingMatches), existingMatches);
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    sendTelegramMessage(chatId, "AI/search chưa lấy được danh sách trận phù hợp. Hãy thử lại với prompt cụ thể hơn.");
+    return;
+  }
+
+  if (!matches.length) {
+    sendTelegramMessage(chatId, "AI không tìm được trận nào phù hợp yêu cầu.");
+    return;
+  }
+
+  var proposal = buildAiMatchProposal(buildAiMatchProposalRequestId(new Date()), prompt, matches, new Date());
+  saveAiMatchProposal(proposal);
+  sendTelegramMessage(chatId, formatAiMatchProposalMessage(proposal), buildAiMatchProposalKeyboard(proposal));
+}
+
 function adminSetMatchTime(chatId, actor, args) {
   var matchId = args[0];
   var kickoffUtc = args[1];
@@ -213,6 +241,11 @@ function handleCallbackQuery(callbackQuery) {
 
   if (data.action === "reset_select" || data.action === "reset_confirm" || data.action === "reset_cancel") {
     handleResetSheetCallback(callbackQuery, data, admin);
+    return;
+  }
+
+  if (data.action === "match_toggle" || data.action === "match_submit" || data.action === "match_cancel") {
+    handleAiMatchProposalCallback(callbackQuery, data, admin);
     return;
   }
 
@@ -406,6 +439,50 @@ function handleResetSheetCallback(callbackQuery, data, admin) {
     var result = resetSheetData(sheetName, callbackQuery.from.id);
     answerCallbackQuery(callbackQuery.id, result.ok ? "Đã reset." : "Reset thất bại.");
     sendTelegramMessage(chatId, result.ok ? "Đã reset sheet " + sheetName + " (" + result.clearedRows + " rows)." : "Không reset được sheet " + sheetName + ".");
+  }
+}
+
+function handleAiMatchProposalCallback(callbackQuery, data, admin) {
+  var chatId = callbackQuery.message.chat.id;
+  var messageId = callbackQuery.message.message_id;
+  var actor = callbackQuery.from.id;
+  if (!admin) {
+    answerCallbackQuery(callbackQuery.id, "Chỉ admin được duyệt lịch trận.");
+    return;
+  }
+
+  var proposal = getAiMatchProposal(data.matchId);
+  if (!proposal) {
+    answerCallbackQuery(callbackQuery.id, "Đề xuất đã hết hạn hoặc không tồn tại.");
+    sendTelegramMessage(chatId, "Đề xuất lịch trận đã hết hạn. Hãy chạy lại /ai_matches <prompt>.");
+    return;
+  }
+
+  if (data.action === "match_cancel") {
+    deleteAiMatchProposal(proposal.requestId);
+    answerCallbackQuery(callbackQuery.id, "Đã hủy đề xuất.");
+    editTelegramMessageText(chatId, messageId, "Đã hủy đề xuất lịch trận AI/search.");
+    return;
+  }
+
+  if (data.action === "match_toggle") {
+    var nextProposal = toggleAiMatchProposalSelection(proposal, data.value);
+    saveAiMatchProposal(nextProposal);
+    answerCallbackQuery(callbackQuery.id, "Đã cập nhật lựa chọn.");
+    editTelegramMessageText(chatId, messageId, formatAiMatchProposalMessage(nextProposal), buildAiMatchProposalKeyboard(nextProposal));
+    return;
+  }
+
+  if (data.action === "match_submit") {
+    var selectedMatches = getSelectedAiMatchProposalMatches(proposal);
+    if (!selectedMatches.length) {
+      answerCallbackQuery(callbackQuery.id, "Chưa chọn trận nào.");
+      return;
+    }
+    var result = appendMatches(selectedMatches, actor);
+    deleteAiMatchProposal(proposal.requestId);
+    answerCallbackQuery(callbackQuery.id, "Đã ghi trận đã chọn.");
+    editTelegramMessageText(chatId, messageId, formatAiMatchSubmitResult(result));
   }
 }
 

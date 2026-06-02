@@ -14,6 +14,11 @@ const {
   buildPickKeyboard,
   buildAiResultProposalPrompt,
   buildAiOddsProposalPrompt,
+  buildAiMatchesPrompt,
+  normalizeAiMatchProposals,
+  filterNewAiMatchProposals,
+  formatAiMatchProposalMessage,
+  buildAiMatchProposalKeyboard,
   formatKickoffTime,
   formatLeaderboard,
   formatHandicap,
@@ -501,10 +506,157 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/set_odds/);
   assert.match(adminCommands, /\/lock_summary <matchId>/);
   assert.match(adminCommands, /\/ai_result <matchId>/);
+  assert.match(adminCommands, /\/ai_matches <prompt>/);
   assert.match(adminCommands, /\/reset_latest_settle/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
   assert.match(adminCommands, /đề xuất kết quả/);
+});
+
+test("builds AI match search prompt from admin request", () => {
+  var prompt = buildAiMatchesPrompt("lấy các trận đấu vòng loại World cup 2026", [
+    {
+      matchId: "WCQ_20260611190000_MEXICO-SOUTH_AFRICA",
+      homeTeam: "Mexico",
+      awayTeam: "South Africa",
+      kickoffUtc: "2026-06-11T19:00:00.000Z",
+    },
+  ]);
+
+  assert.match(prompt, /web search/i);
+  assert.match(prompt, /lấy các trận đấu vòng loại World cup 2026/);
+  assert.match(prompt, /Không đề xuất lại các trận đã có/);
+  assert.match(prompt, /WCQ_20260611190000_MEXICO-SOUTH_AFRICA: Mexico vs South Africa/);
+  assert.match(prompt, /matchId/);
+  assert.match(prompt, /kickoffUtc/);
+  assert.match(prompt, /JSON duy nhất/);
+});
+
+test("normalizes AI match proposals into schedulable matches", () => {
+  var proposals = normalizeAiMatchProposals({
+    matches: [
+      {
+        matchId: "1",
+        homeTeam: "Vietnam",
+        awayTeam: "Indonesia",
+        kickoffUtc: "2026-06-11T12:00:00+07:00",
+        stage: "group",
+        sources: ["https://www.fifa.com/example"],
+      },
+      {
+        matchId: "custom-1",
+        homeTeam: "Japan",
+        awayTeam: "Australia",
+        kickoffUtc: "2026-06-12T10:00:00.000Z",
+        stage: "knockout",
+        sourceUrls: ["https://www.the-afc.com/example", "not-a-url"],
+      },
+    ],
+  });
+
+  assert.deepEqual(proposals, [
+    {
+      matchId: "WCQ_20260611050000_VIETNAM-INDONESIA",
+      homeTeam: "Vietnam",
+      awayTeam: "Indonesia",
+      kickoffUtc: "2026-06-11T05:00:00.000Z",
+      stage: "GROUP",
+      status: STATUSES.SCHEDULED,
+      sources: ["https://www.fifa.com/example"],
+    },
+    {
+      matchId: "WCQ_20260612100000_JAPAN-AUSTRALIA",
+      homeTeam: "Japan",
+      awayTeam: "Australia",
+      kickoffUtc: "2026-06-12T10:00:00.000Z",
+      stage: "KNOCKOUT",
+      status: STATUSES.SCHEDULED,
+      sources: ["https://www.the-afc.com/example"],
+    },
+  ]);
+});
+
+test("filters AI match proposals that duplicate existing fixtures even with different IDs or aliases", () => {
+  var proposals = normalizeAiMatchProposals({
+    matches: [
+      {
+        matchId: "4",
+        homeTeam: "USA",
+        awayTeam: "Paraguay",
+        kickoffUtc: "2026-06-13T01:00:00.000Z",
+        stage: "GROUP",
+      },
+      {
+        matchId: "19",
+        homeTeam: "Argentina",
+        awayTeam: "Algeria",
+        kickoffUtc: "2026-06-17T01:00:00.000Z",
+        stage: "GROUP",
+      },
+    ],
+  });
+
+  assert.deepEqual(filterNewAiMatchProposals(proposals, [
+    {
+      matchId: "WCQ_20260613010000_UNITED_STATES-PARAGUAY",
+      homeTeam: "United States",
+      awayTeam: "Paraguay",
+      kickoffUtc: "2026-06-13T01:00:00.000Z",
+    },
+  ]), [
+    {
+      matchId: "WCQ_20260617010000_ARGENTINA-ALGERIA",
+      homeTeam: "Argentina",
+      awayTeam: "Algeria",
+      kickoffUtc: "2026-06-17T01:00:00.000Z",
+      stage: "GROUP",
+      status: STATUSES.SCHEDULED,
+      sources: [],
+    },
+  ]);
+});
+
+test("formats AI match proposal with selectable keyboard", () => {
+  var proposal = {
+    requestId: "REQ1",
+    prompt: "world cup qualifiers",
+    matches: [
+      {
+        matchId: "WCQ-1",
+        homeTeam: "Vietnam",
+        awayTeam: "Indonesia",
+        kickoffUtc: "2026-06-11T05:00:00.000Z",
+        stage: "GROUP",
+        status: STATUSES.SCHEDULED,
+        sources: ["https://www.fifa.com/example"],
+      },
+      {
+        matchId: "WCQ-2",
+        homeTeam: "Japan",
+        awayTeam: "Australia",
+        kickoffUtc: "2026-06-12T10:00:00.000Z",
+        stage: "KNOCKOUT",
+        status: STATUSES.SCHEDULED,
+        sources: [],
+      },
+    ],
+    selected: [true, false],
+  };
+
+  assert.match(formatAiMatchProposalMessage(proposal), /Đề xuất lịch trận AI\/search/);
+  assert.match(formatAiMatchProposalMessage(proposal), /\[x\] WCQ-1/);
+  assert.match(formatAiMatchProposalMessage(proposal), /\[ \] WCQ-2/);
+
+  assert.deepEqual(buildAiMatchProposalKeyboard(proposal), {
+    inline_keyboard: [
+      [{ text: "[x] WCQ-1", callback_data: "match_toggle|REQ1|0" }],
+      [{ text: "[ ] WCQ-2", callback_data: "match_toggle|REQ1|1" }],
+      [
+        { text: "Submit selected", callback_data: "match_submit|REQ1|" },
+        { text: "Cancel", callback_data: "match_cancel|REQ1|" },
+      ],
+    ],
+  });
 });
 
 test("selects latest settled match and builds reset settlement patch", () => {

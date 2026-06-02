@@ -79,6 +79,11 @@ function generateAiOddsProposal(match) {
   return normalizeAiOddsProposal(JSON.parse(text));
 }
 
+function generateAiMatchProposals(adminPrompt, existingMatches) {
+  var text = generateAiText(buildAiMatchesPrompt(adminPrompt, existingMatches), { webSearch: true });
+  return normalizeAiMatchProposals(JSON.parse(text));
+}
+
 function generateAiDryRunMatches(baseTimeUtc) {
   var text = generateAiText(buildDryRunPrompt(baseTimeUtc), { webSearch: false });
   var parsed = JSON.parse(text);

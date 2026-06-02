@@ -21,6 +21,17 @@ function sendTelegramMessage(chatId, text, replyMarkup) {
   return telegramApi("sendMessage", payload);
 }
 
+function editTelegramMessageText(chatId, messageId, text, replyMarkup) {
+  var payload = {
+    chat_id: String(chatId),
+    message_id: messageId,
+    text: text,
+    disable_web_page_preview: true,
+  };
+  if (replyMarkup) payload.reply_markup = replyMarkup;
+  return telegramApi("editMessageText", payload);
+}
+
 function answerCallbackQuery(callbackQueryId, text) {
   return telegramApi("answerCallbackQuery", {
     callback_query_id: callbackQueryId,
