@@ -109,6 +109,7 @@ Use player commands and pick buttons in direct messages with the bot. The bot ig
 - `/set_player_active <telegramUserId> <true|false>`
 - `/add_match <matchId> <kickoffUtc> <GROUP|KNOCKOUT> <home team> vs <away team>`
 - `/set_match_time <matchId> <kickoffUtc>`
+- `/fix_match_times [hours]` — dời giờ tất cả trận chưa diễn ra (SCHEDULED/OPEN), mặc định +1h
 - `/reset_sheet`
 - `/dryrun [baseTimeUtc]`
 - `/dryrun_finish`
