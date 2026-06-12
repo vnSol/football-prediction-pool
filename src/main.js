@@ -112,6 +112,7 @@ function handleMessage(message) {
   if (command.name === "add_match") return adminAddMatch(chatId, message.from.id, command.args);
   if (command.name === "ai_matches") return adminAiMatches(chatId, message.from.id, command.args);
   if (command.name === "set_match_time") return adminSetMatchTime(chatId, message.from.id, command.args);
+  if (command.name === "fix_match_times") return adminFixMatchTimes(chatId, message.from.id, command.args);
   if (command.name === "reset_sheet") return adminResetSheet(chatId);
   if (command.name === "dryrun") return adminDryRun(chatId, message.from.id, command.args);
   if (command.name === "dryrun_finish") return adminDryRunFinish(chatId, message.from.id);
@@ -231,6 +232,28 @@ function adminSetMatchTime(chatId, actor, args) {
   }
   updateMatch(matchId, { kickoffUtc: toDate(kickoffUtc).toISOString() }, actor, "SET_MATCH_TIME");
   sendTelegramMessage(chatId, "Đã cập nhật giờ đá " + matchId + ": " + formatKickoffTime(kickoffUtc) + ".");
+}
+
+function adminFixMatchTimes(chatId, actor, args) {
+  var hours = parseFixMatchTimesArgs(args);
+  if (hours === null) {
+    sendTelegramMessage(chatId, "Cú pháp: /fix_match_times [hours]. Mặc định +1. Ví dụ: /fix_match_times 1 hoặc /fix_match_times -0.5");
+    return;
+  }
+  var plan = buildMatchTimeFixPlan(getMatches(), hours, new Date());
+  if (!plan.length) {
+    sendTelegramMessage(chatId, "Không có trận chưa diễn ra (SCHEDULED/OPEN) để dời giờ.");
+    return;
+  }
+  plan.forEach(function (item) {
+    updateMatch(item.matchId, { kickoffUtc: item.newKickoffUtc }, actor, "FIX_MATCH_TIME");
+  });
+  var sign = hours > 0 ? "+" : "";
+  var lines = ["Đã dời giờ " + plan.length + " trận chưa diễn ra (" + sign + hours + "h):"];
+  plan.forEach(function (item) {
+    lines.push("• " + item.matchId + ": " + formatKickoffTime(item.oldKickoffUtc) + " → " + formatKickoffTime(item.newKickoffUtc));
+  });
+  sendTelegramMessage(chatId, lines.join("\n"));
 }
 
 function handleCallbackQuery(callbackQuery) {

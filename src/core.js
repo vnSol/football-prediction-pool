@@ -415,6 +415,31 @@ function hoursUntil(match, now) {
   return minutesUntil(match, now) / 60;
 }
 
+function parseFixMatchTimesArgs(args) {
+  var raw = args && args.length ? String(args[0]).trim() : "1";
+  var hours = Number(raw);
+  if (!isFinite(hours) || hours === 0) return null;
+  return hours;
+}
+
+function buildMatchTimeFixPlan(matches, hours, now) {
+  var shiftMs = Number(hours) * 60 * 60 * 1000;
+  var reference = toDate(now || new Date()).getTime();
+  return (matches || [])
+    .filter(function (match) {
+      if (match.status !== STATUSES.SCHEDULED && match.status !== STATUSES.OPEN) return false;
+      return toDate(match.kickoffUtc).getTime() > reference;
+    })
+    .map(function (match) {
+      var oldKickoff = toDate(match.kickoffUtc);
+      return {
+        matchId: match.matchId,
+        oldKickoffUtc: oldKickoff.toISOString(),
+        newKickoffUtc: new Date(oldKickoff.getTime() + shiftMs).toISOString(),
+      };
+    });
+}
+
 function getSchedulerActions(matches, picks, now) {
   var actions = [];
 
@@ -529,6 +554,7 @@ function formatCommands(isAdmin) {
       "/set_player_active <telegramUserId> <true|false> - Bật/tắt người chơi",
       "/add_match <matchId> <kickoffUtc> <GROUP|KNOCKOUT> <home team> vs <away team> - Thêm trận",
       "/set_match_time <matchId> <kickoffUtc> - Sửa giờ đá",
+      "/fix_match_times [hours] - Dời giờ tất cả trận chưa diễn ra (mặc định +1h)",
       "/set_odds <matchId> <HOME|AWAY> <handicap> - Nhập kèo",
       "/open <matchId> - Mở pick thủ công",
       "/lock <matchId> - Khóa pick thủ công",
@@ -2091,6 +2117,8 @@ if (typeof module !== "undefined") {
     isKnockout: isKnockout,
     isValidSelection: isValidSelection,
     parseAddMatchArgs: parseAddMatchArgs,
+    parseFixMatchTimesArgs: parseFixMatchTimesArgs,
+    buildMatchTimeFixPlan: buildMatchTimeFixPlan,
     parseAddPlayerArgs: parseAddPlayerArgs,
     parseCallbackData: parseCallbackData,
     parseBoolean: parseBoolean,

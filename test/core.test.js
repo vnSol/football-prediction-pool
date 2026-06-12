@@ -39,6 +39,8 @@ const {
   getTelegramUpdateDedupeKey,
   isPrivateTelegramChat,
   parseAddMatchArgs,
+  parseFixMatchTimesArgs,
+  buildMatchTimeFixPlan,
   parseAddPlayerArgs,
   buildAiRecapPrompt,
   buildLockDramaPrompt,
@@ -1658,4 +1660,28 @@ test("parses admin add match arguments with vs separator", () => {
   );
   assert.equal(parseAddMatchArgs(["T001", "not-a-date", "GROUP", "A", "vs", "B"]), null);
   assert.equal(parseAddMatchArgs(["T001", "2026-06-12T19:00:00.000Z", "GROUP", "A"]), null);
+});
+
+test("parseFixMatchTimesArgs defaults to +1 and rejects invalid", () => {
+  assert.equal(parseFixMatchTimesArgs([]), 1);
+  assert.equal(parseFixMatchTimesArgs(["2"]), 2);
+  assert.equal(parseFixMatchTimesArgs(["-0.5"]), -0.5);
+  assert.equal(parseFixMatchTimesArgs(["0"]), null);
+  assert.equal(parseFixMatchTimesArgs(["abc"]), null);
+});
+
+test("buildMatchTimeFixPlan shifts only not-yet-played future matches", () => {
+  const now = new Date("2026-06-12T00:00:00.000Z");
+  const matches = [
+    { matchId: "A", status: STATUSES.SCHEDULED, kickoffUtc: "2026-06-12T19:00:00.000Z" },
+    { matchId: "B", status: STATUSES.OPEN, kickoffUtc: "2026-06-12T20:00:00.000Z" },
+    { matchId: "C", status: STATUSES.LOCKED, kickoffUtc: "2026-06-12T21:00:00.000Z" },
+    { matchId: "D", status: STATUSES.SETTLED, kickoffUtc: "2026-06-12T22:00:00.000Z" },
+    { matchId: "E", status: STATUSES.SCHEDULED, kickoffUtc: "2026-06-11T19:00:00.000Z" },
+  ];
+  const plan = buildMatchTimeFixPlan(matches, 1, now);
+  assert.deepEqual(plan, [
+    { matchId: "A", oldKickoffUtc: "2026-06-12T19:00:00.000Z", newKickoffUtc: "2026-06-12T20:00:00.000Z" },
+    { matchId: "B", oldKickoffUtc: "2026-06-12T20:00:00.000Z", newKickoffUtc: "2026-06-12T21:00:00.000Z" },
+  ]);
 });
