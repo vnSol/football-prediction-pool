@@ -5,7 +5,7 @@
 This strategy covers the T-24h missing-odds flow:
 
 - Scheduler finds scheduled matches inside T-24h that do not have locked odds.
-- Bot auto-applies a handicap line when fixed bookmaker sources provide one, then opens picks.
+- Bot auto-applies a handicap line when the fixed source kqbd.mobi/keo-bong-da provides one, then opens picks.
 - Bot notifies admins with source links and the applied/defaulted line; admins can adjust later with `/set_odds`.
 - Dry-run uses a synthetic odds proposal for `DRY-` matches instead of public source links.
 
@@ -27,10 +27,10 @@ Coverage focus:
 
 - Scheduler emits `ODDS_ALERT` for missing odds inside T-24h so the bot can fetch/apply odds before opening.
 - Scheduler does not repeat the odds prompt after `oddsAlertedAt` is set.
-- AI odds prompt asks for fixed Bet365, Unibet, and Bwin source lines and a JSON-only Asian handicap payload.
+- AI odds prompt asks for the fixed kqbd.mobi/keo-bong-da full-match handicap line and a JSON-only Asian handicap payload.
 - Odds proposal normalization accepts `HOME`/`AWAY`, numeric handicap, and filters invalid URLs.
 - Auto-apply patch copies clear proposal values into confirmed odds fields with `AUTO_APPLIED`.
-- Missing/unclear bookmaker lines default to HOME 0 with `DEFAULTED`.
+- Missing/unclear source line defaults to HOME 0 with `DEFAULTED`.
 - Dry-run odds proposal is synthetic and source-free.
 
 ## Manual Dry-Run Check

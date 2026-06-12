@@ -4,7 +4,7 @@ Google Apps Script + Telegram Bot automation for an internal World Cup predictio
 
 ## What It Does
 
-- At T-24h, uses AI/web search to summarize missing handicap odds from Bet365, Unibet, and Bwin, applies the proposed line automatically, and opens picks.
+- At T-24h, uses AI/web search to read missing handicap odds from the fixed source https://kqbd.mobi/keo-bong-da, applies the proposed line automatically, and opens picks.
 - Notifies admins with the odds/source summary so they can adjust later with `/set_odds` if needed.
 - Lets players change picks through Telegram until kickoff.
 - Lets players self-register by messaging the bot directly with `/join`.
@@ -135,7 +135,7 @@ Players can direct-message `/join` to add themselves to `Players` with `active=t
 
 The bot uses OpenAI for four automated messages:
 
-- At T-24h before kickoff when odds are missing: an admin-only handicap summary using web search over fixed Bet365, Unibet, and Bwin sources. The bot averages available lines from those three sources, applies the proposed line, opens picks immediately, and links any source it found. If all three are missing or unclear, it opens with the default HOME 0 line. Admins can review the message and adjust with `/set_odds`.
+- At T-24h before kickoff when odds are missing: an admin-only handicap summary using web search over the fixed source https://kqbd.mobi/keo-bong-da (including its per-league/per-day subpages such as `/keo-bong-da/world-cup`). The bot reads the full-match Asian handicap line from that source, applies the proposed line, opens picks immediately, and links the source page. If the line is missing or unclear, it opens with the default HOME 0 line. Admins can review the message and adjust with `/set_odds`.
 - After lock: a suspenseful betting summary based only on Sheet facts, followed by a deterministic list of every player's final pick.
 - At T+120m after kickoff: an admin-only result proposal using web search over 1-2 public sources. The message includes match status, proposed score if available, source links, and Y/N buttons. Admin verifies the links, taps Y to auto-write the result and settle, or taps N to reject.
 - After settle: a localized match recap using confirmed match facts, betting results, leaderboard, and web search over at most two public sources.

@@ -727,10 +727,10 @@ test("formats game rules for players", () => {
   assert.match(rules, /\/join, \/matches, \/mypick, \/commands/);
   assert.match(rules, /không trả lời trong group/);
   assert.match(rules, /T-24h/);
-  assert.match(rules, /Bet365, Unibet, Bwin/);
+  assert.match(rules, /kqbd\.mobi\/keo-bong-da/);
   assert.match(rules, /tự áp kèo đề xuất và mở pick/);
-  assert.match(rules, /trung bình cộng/);
-  assert.match(rules, /cả 3 nguồn/);
+  assert.match(rules, /dẫn link trang kèo trên kqbd\.mobi/);
+  assert.match(rules, /Nếu nguồn chưa có kèo đủ rõ/);
   assert.match(rules, /admin có thể chỉnh bằng \/set_odds/);
   assert.match(rules, /T-2h/);
   assert.match(rules, /T-30m/);
@@ -1411,12 +1411,10 @@ test("builds AI odds proposal prompt for auto-apply", () => {
     kickoffUtc: "2026-05-30T16:00:00.000Z",
   });
 
-  assert.match(prompt, /Bet365/);
-  assert.match(prompt, /Unibet/);
-  assert.match(prompt, /Bwin/);
-  assert.match(prompt, /3 nguồn cố định/);
+  assert.match(prompt, /https:\/\/kqbd\.mobi\/keo-bong-da/);
+  assert.match(prompt, /1 nguồn cố định/);
   assert.match(prompt, /Không dùng nguồn khác/);
-  assert.match(prompt, /trung bình cộng/i);
+  assert.match(prompt, /kèo chấp cả trận/);
   assert.match(prompt, /bookmakerLines/);
   assert.match(prompt, /Asian handicap/);
   assert.match(prompt, /JSON/);
@@ -1433,23 +1431,19 @@ test("normalizes and formats AI odds proposal for admin verification", () => {
     kickoffUtc: "2026-05-30T16:00:00.000Z",
   };
   const proposal = normalizeAiOddsProposal({
-    summary: "PSG chấp theo trung bình market",
+    summary: "PSG chấp theo kèo kqbd.mobi",
     bookmakerLines: [
-      { bookmaker: "Bet365", favoriteSide: "home", handicapGoals: "0.5", url: "https://bet365.example/odds" },
-      { bookmaker: "Unibet", favoriteSide: "HOME", handicapGoals: "0.25", url: "https://unibet.example/odds" },
-      { bookmaker: "Bwin", favoriteSide: "home", handicapGoals: "0.5", url: "https://bwin.example/odds" },
+      { bookmaker: "Kqbd.mobi", favoriteSide: "home", handicapGoals: "0.5", url: "https://kqbd.mobi/keo-bong-da/world-cup" },
     ],
   });
 
   assert.deepEqual(proposal, {
     favoriteSide: SELECTIONS.HOME,
     handicapGoals: 0.5,
-    summary: "PSG chấp theo trung bình market",
-    sources: ["https://bet365.example/odds", "https://unibet.example/odds", "https://bwin.example/odds"],
+    summary: "PSG chấp theo kèo kqbd.mobi",
+    sources: ["https://kqbd.mobi/keo-bong-da/world-cup"],
     bookmakerLines: [
-      { bookmaker: "Bet365", favoriteSide: SELECTIONS.HOME, handicapGoals: 0.5, url: "https://bet365.example/odds", note: "" },
-      { bookmaker: "Unibet", favoriteSide: SELECTIONS.HOME, handicapGoals: 0.25, url: "https://unibet.example/odds", note: "" },
-      { bookmaker: "Bwin", favoriteSide: SELECTIONS.HOME, handicapGoals: 0.5, url: "https://bwin.example/odds", note: "" },
+      { bookmaker: "Kqbd.mobi", favoriteSide: SELECTIONS.HOME, handicapGoals: 0.5, url: "https://kqbd.mobi/keo-bong-da/world-cup", note: "" },
     ],
   });
 
@@ -1457,32 +1451,26 @@ test("normalizes and formats AI odds proposal for admin verification", () => {
 
   assert.match(message, /Đề xuất kèo AI\/search/);
   assert.match(message, /Paris Saint-Germain chấp Arsenal 0.5 Trái/);
-  assert.match(message, /Tổng hợp: trung bình cộng 3 nguồn có line/);
-  assert.match(message, /Bet365: Paris Saint-Germain chấp Arsenal 0.5 Trái - https:\/\/bet365\.example\/odds/);
-  assert.match(message, /Unibet: Paris Saint-Germain chấp Arsenal 0.25 Trái - https:\/\/unibet\.example\/odds/);
-  assert.match(message, /Bwin: Paris Saint-Germain chấp Arsenal 0.5 Trái - https:\/\/bwin\.example\/odds/);
+  assert.match(message, /Tổng hợp: lấy line kèo chấp cả trận từ kqbd\.mobi/);
+  assert.match(message, /Kqbd\.mobi: Paris Saint-Germain chấp Arsenal 0.5 Trái - https:\/\/kqbd\.mobi\/keo-bong-da\/world-cup/);
   assert.match(message, /Bot đã tự ghi kèo này và mở pick ở T-24/);
   assert.match(message, /nếu cần chỉnh thì dùng \/set_odds DRY-C1-FINAL-2026/);
 });
 
-test("leaves proposal odds empty when all fixed bookmaker sources are missing", () => {
+test("leaves proposal odds empty when the fixed source is missing", () => {
   const proposal = normalizeAiOddsProposal({
     bookmakerLines: [
-      { bookmaker: "Bet365", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
-      { bookmaker: "Unibet", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
-      { bookmaker: "Bwin", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+      { bookmaker: "Kqbd.mobi", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
     ],
   });
 
   assert.deepEqual(proposal, {
     favoriteSide: null,
     handicapGoals: null,
-    summary: "Cả 3 nguồn cố định chưa có kèo public đủ rõ; bot sẽ dùng kèo mặc định để mở pick.",
+    summary: "Nguồn cố định kqbd.mobi chưa có kèo public đủ rõ; bot sẽ dùng kèo mặc định để mở pick.",
     sources: [],
     bookmakerLines: [
-      { bookmaker: "Bet365", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
-      { bookmaker: "Unibet", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
-      { bookmaker: "Bwin", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
+      { bookmaker: "Kqbd.mobi", favoriteSide: null, handicapGoals: null, url: "", note: "Không thấy line public" },
     ],
   });
 
@@ -1524,7 +1512,7 @@ test("builds default auto-apply odds patch when no clear proposal exists", () =>
       {
         favoriteSide: null,
         handicapGoals: null,
-        summary: "Cả 3 nguồn chưa có line rõ",
+        summary: "Nguồn kqbd.mobi chưa có line rõ",
         sources: [],
       },
       date("2026-05-30T10:00:00.000Z")
@@ -1532,7 +1520,7 @@ test("builds default auto-apply odds patch when no clear proposal exists", () =>
     {
       oddsProposalFavoriteSide: "",
       oddsProposalHandicapGoals: "",
-      oddsProposalSummary: "Cả 3 nguồn chưa có line rõ",
+      oddsProposalSummary: "Nguồn kqbd.mobi chưa có line rõ",
       oddsProposalSources: "",
       oddsProposalAt: "2026-05-30T10:00:00.000Z",
       oddsProposalDecision: "DEFAULTED",

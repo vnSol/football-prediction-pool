@@ -29,7 +29,8 @@ var SOURCE = Object.freeze({
 var PICK_OPEN_WINDOW_MINUTES = 24 * 60;
 var MISSING_PICK_REMINDER_2H_MINUTES = 120;
 var MISSING_PICK_REMINDER_30M_MINUTES = 30;
-var ODDS_BOOKMAKERS = Object.freeze(["Bet365", "Unibet", "Bwin"]);
+var ODDS_BOOKMAKERS = Object.freeze(["Kqbd.mobi"]);
+var ODDS_SOURCE_URL = "https://kqbd.mobi/keo-bong-da";
 var DIRECT_ONLY_PLAYER_COMMANDS = Object.freeze(["pick", "mypick", "matches", "join", "commands"]);
 
 function toDate(value) {
@@ -558,9 +559,9 @@ function formatRules() {
     "",
     "2. Mở pick",
     "- Bot mở pick ở T-24h.",
-    "- Nếu thiếu kèo ở T-24h, bot tổng hợp kèo từ Bet365, Unibet, Bwin, tự áp kèo đề xuất và mở pick.",
-    "- Kèo đề xuất là trung bình cộng các nguồn có line; nguồn nào có link thì bot dẫn link nguồn đó.",
-    "- Nếu cả 3 nguồn đều chưa có kèo đủ rõ, bot mở bằng kèo mặc định; admin có thể chỉnh bằng /set_odds.",
+    "- Nếu thiếu kèo ở T-24h, bot lấy kèo chấp cả trận từ kqbd.mobi/keo-bong-da, tự áp kèo đề xuất và mở pick.",
+    "- Bot dẫn link trang kèo trên kqbd.mobi để admin verify.",
+    "- Nếu nguồn chưa có kèo đủ rõ, bot mở bằng kèo mặc định; admin có thể chỉnh bằng /set_odds.",
     "- Người chơi có thể đổi pick đến trước giờ bóng lăn.",
     "",
     "3. Cách pick",
@@ -1315,21 +1316,21 @@ function buildConfirmResultProposalPatch(match, now) {
 function buildAiOddsProposalPrompt(match) {
   return [
     "Bạn là trợ lý vận hành cho game dự đoán bóng đá nội bộ.",
-    "Trước T-24h, hãy dùng web search để đọc Asian handicap/handicap line từ đúng 3 nguồn cố định: Bet365, Unibet, Bwin.",
+    "Trước T-24h, hãy đọc Asian handicap/kèo chấp cả trận từ đúng 1 nguồn cố định: " + ODDS_SOURCE_URL + " (bao gồm trang con theo giải hoặc theo ngày như " + ODDS_SOURCE_URL + "/world-cup, " + ODDS_SOURCE_URL + "/ngay-mai).",
     "Không dùng nguồn khác để lấy kèo. Nguồn khác chỉ được bỏ qua, không được dùng để suy luận line.",
-    "Với từng bookmaker, nếu không có line public đủ rõ hoặc không truy cập được, để favoriteSide và handicapGoals là null và ghi note ngắn.",
-    "Bot sẽ tự tính kèo bằng trung bình cộng các nguồn có line trong 3 nguồn cố định; nếu cả 3 đều không có thì bot dùng kèo mặc định và admin có thể sửa sau bằng /set_odds.",
+    "Lấy kèo chấp cả trận (không lấy kèo hiệp 1, tài xỉu hay kèo góc). Nếu không có line public đủ rõ hoặc không truy cập được, để favoriteSide và handicapGoals là null và ghi note ngắn.",
+    "Nếu nguồn không có kèo đủ rõ thì bot dùng kèo mặc định và admin có thể sửa sau bằng /set_odds.",
     "Không bịa kèo, nguồn hoặc diễn giải.",
     "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
     "",
     "Schema:",
-    '{ "summary": "ngắn gọn", "bookmakerLines": [{ "bookmaker": "Bet365|Unibet|Bwin", "favoriteSide": "HOME|AWAY|null", "handicapGoals": number|null, "url": "https://... hoặc chuỗi rỗng", "note": "ngắn gọn nếu thiếu line" }] }',
+    '{ "summary": "ngắn gọn", "bookmakerLines": [{ "bookmaker": "Kqbd.mobi", "favoriteSide": "HOME|AWAY|null", "handicapGoals": number|null, "url": "https://... hoặc chuỗi rỗng", "note": "ngắn gọn nếu thiếu line" }] }',
     "",
     "Quy ước:",
-    "- bookmakerLines phải có đủ 3 object theo thứ tự Bet365, Unibet, Bwin.",
-    "- favoriteSide là đội chấp theo line của bookmaker đó.",
+    "- bookmakerLines phải có đúng 1 object cho Kqbd.mobi.",
+    "- favoriteSide là đội chấp theo line trên kqbd.mobi.",
     "- handicapGoals là số trái chấp không âm, ví dụ 0, 0.25, 0.5, 0.75, 1.",
-    "- url là link public trực tiếp tới nguồn bookmaker nếu có; nguồn nào có link thì dẫn link nguồn đó.",
+    "- url là link trang kqbd.mobi chứa kèo của trận đó; nếu không xác định được trang con thì dùng " + ODDS_SOURCE_URL + ".",
     "",
     "Match facts:",
     "- matchId: " + match.matchId,
@@ -1387,9 +1388,7 @@ function normalizeBookmakerLines(lines) {
 
 function normalizeBookmakerName(value) {
   var key = String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (key.indexOf("bet365") !== -1) return "Bet365";
-  if (key.indexOf("unibet") !== -1) return "Unibet";
-  if (key.indexOf("bwin") !== -1) return "Bwin";
+  if (key.indexOf("kqbd") !== -1 || key.indexOf("keonhacai") !== -1 || key.indexOf("keobongda") !== -1) return "Kqbd.mobi";
   return "";
 }
 
@@ -1474,9 +1473,9 @@ function hasBookmakerOdds(line) {
 
 function buildAverageBookmakerSummary(aggregate) {
   if (!aggregate.validSourceCount) {
-    return "Cả 3 nguồn cố định chưa có kèo public đủ rõ; bot sẽ dùng kèo mặc định để mở pick.";
+    return "Nguồn cố định kqbd.mobi chưa có kèo public đủ rõ; bot sẽ dùng kèo mặc định để mở pick.";
   }
-  return "Tổng hợp trung bình cộng " + aggregate.validSourceCount + " nguồn có line từ Bet365, Unibet, Bwin.";
+  return "Lấy kèo chấp cả trận từ nguồn cố định kqbd.mobi/keo-bong-da.";
 }
 
 function normalizeProposalSelection(value) {
@@ -1545,8 +1544,8 @@ function formatAdminOddsProposal(match, proposal) {
 
 function formatAverageBookmakerLine(bookmakerLines) {
   var count = bookmakerLines.filter(hasBookmakerOdds).length;
-  if (!count) return "Tổng hợp: cả 3 nguồn cố định chưa có line đủ rõ; bot dùng kèo mặc định để mở pick.";
-  return "Tổng hợp: trung bình cộng " + count + " nguồn có line.";
+  if (!count) return "Tổng hợp: nguồn cố định kqbd.mobi chưa có line đủ rõ; bot dùng kèo mặc định để mở pick.";
+  return "Tổng hợp: lấy line kèo chấp cả trận từ kqbd.mobi.";
 }
 
 function formatAdminBookmakerLine(match, line) {
