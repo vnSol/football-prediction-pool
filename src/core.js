@@ -1360,6 +1360,7 @@ function buildAiOddsProposalPrompt(match) {
     "Quy ước:",
     "- bookmakerLines phải có đúng 1 object cho Kqbd.mobi.",
     "- favoriteSide là đội chấp theo line trên kqbd.mobi.",
+    "- Cách đọc bảng kqbd.mobi: đội chấp (favoriteSide) là đội được BÔI ĐẬM/MÀU XANH và có số kèo (ví dụ 0.5/1) hiển thị ngay ở HÀNG của đội đó. Đội còn lại là đội được chấp. Ví dụ: nếu số kèo nằm ở hàng đội khách thì favoriteSide là AWAY, không phải HOME.",
     "- handicapGoals là số trái chấp không âm, ví dụ 0, 0.25, 0.5, 0.75, 1.",
     "- url là link trang kqbd.mobi chứa kèo của trận đó; nếu không xác định được trang con thì dùng " + ODDS_SOURCE_URL + ".",
     "",
