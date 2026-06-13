@@ -804,9 +804,14 @@ function buildAiRecapPrompt(input) {
   ].join("\n");
 }
 
-function buildAiResultProposalPrompt(match) {
+function buildAiResultProposalPrompt(match, now) {
+  var reference = toDate(now || new Date());
+  var elapsedMinutes = Math.floor((reference.getTime() - toDate(match.kickoffUtc).getTime()) / 60000);
   return [
     "Bạn là trợ lý vận hành cho game dự đoán World Cup nội bộ.",
+    "Thời điểm hiện tại: " + formatKickoffTime(reference.toISOString()) + ".",
+    "Trận đã khai cuộc cách đây " + elapsedMinutes + " phút (tính từ giờ kickoff bên dưới); trận này KHÔNG còn ở tương lai.",
+    "Vì đã quá T+120 phút nên trận gần như chắc chắn đã kết thúc; hãy web search để tìm TỈ SỐ CUỐI, đừng trả NOT_STARTED khi elapsed > 120 phút.",
     "Sau T+120 phút, hãy dùng web search như Google để đọc 1-2 nguồn public và đề xuất tỉ số tính kèo cho admin confirm.",
     "Luật settle: homeScore/awayScore CHỈ là tỉ số sau 90 phút + bù giờ; KHÔNG tính 2 hiệp phụ hoặc loạt luân lưu.",
     "Nếu nguồn ghi 'hòa 1-1 sau 90 phút, thắng 2-1 sau hiệp phụ, thắng 4-3 luân lưu', hãy trả homeScore/awayScore là 1 và 1; có thể nhắc hiệp phụ/luân lưu trong summary.",
