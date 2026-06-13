@@ -1228,12 +1228,15 @@ test("builds AI prompts with facts-first constraints", () => {
 });
 
 test("builds AI result proposal prompt for admin confirmation", () => {
-  const prompt = buildAiResultProposalPrompt({
-    matchId: "M001",
-    homeTeam: "Argentina",
-    awayTeam: "Germany",
-    kickoffUtc: "2026-06-12T20:00:00.000Z",
-  });
+  const prompt = buildAiResultProposalPrompt(
+    {
+      matchId: "M001",
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      kickoffUtc: "2026-06-12T20:00:00.000Z",
+    },
+    "2026-06-12T22:04:00.000Z"
+  );
 
   assert.match(prompt, /1-2 nguồn public/);
   assert.match(prompt, /web search như Google/);
@@ -1243,6 +1246,9 @@ test("builds AI result proposal prompt for admin confirmation", () => {
   assert.match(prompt, /không bịa/i);
   assert.match(prompt, /admin confirm/);
   assert.match(prompt, /M001/);
+  assert.match(prompt, /Thời điểm hiện tại/);
+  assert.match(prompt, /cách đây 124 phút/);
+  assert.match(prompt, /đừng trả NOT_STARTED khi elapsed > 120/);
 });
 
 test("normalizes and formats AI result proposal for admin verification", () => {
