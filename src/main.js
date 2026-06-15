@@ -534,7 +534,7 @@ function adminDryRun(chatId, actor, args) {
       "Refreshed existing: " + (result.refreshed.length ? result.refreshed.join(", ") : "none"),
       "Skipped existing: " + (result.skipped.length ? result.skipped.join(", ") : "none"),
       "Đã chạy scheduler một lượt; dùng /matches để xem các trận đã mở pick.",
-      "Dùng /dryrun_finish để mô phỏng T+120, rồi bấm Y/N trên đề xuất kết quả.",
+      "Dùng /dryrun_finish để mô phỏng T+135, rồi bấm Y/N trên đề xuất kết quả.",
     ].join("\n")
   );
 }

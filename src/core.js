@@ -29,6 +29,7 @@ var SOURCE = Object.freeze({
 var PICK_OPEN_WINDOW_MINUTES = 24 * 60;
 var MISSING_PICK_REMINDER_2H_MINUTES = 120;
 var MISSING_PICK_REMINDER_30M_MINUTES = 30;
+var RESULT_PROMPT_DELAY_MINUTES = 135;
 var ODDS_BOOKMAKERS = Object.freeze(["Kqbd.mobi"]);
 var ODDS_SOURCE_URL = "https://kqbd.mobi/keo-bong-da";
 var DIRECT_ONLY_PLAYER_COMMANDS = Object.freeze(["pick", "mypick", "matches", "join", "commands"]);
@@ -498,7 +499,7 @@ function getSchedulerActions(matches, picks, now) {
 
     if (
       match.status === STATUSES.LOCKED &&
-      untilMinutes <= -120 &&
+      untilMinutes <= -RESULT_PROMPT_DELAY_MINUTES &&
       !match.adminResultPromptedAt &&
       (match.finalHomeScore === "" || match.finalHomeScore == null || match.finalAwayScore === "" || match.finalAwayScore == null)
     ) {
@@ -567,7 +568,7 @@ function formatCommands(isAdmin) {
       "/recap <matchId> - Gửi lại recap",
       "/reset_sheet - Reset dữ liệu sheet",
       "/dryrun [baseTimeUtc ISO UTC] - Tạo dữ liệu mô phỏng",
-      "/dryrun_finish - Mô phỏng T+120 và gửi đề xuất kết quả để admin confirm",
+      "/dryrun_finish - Mô phỏng T+135 và gửi đề xuất kết quả để admin confirm",
     ]);
   }
 
@@ -608,7 +609,7 @@ function formatRules() {
     "- Kết quả tính kèo là tỉ số sau 90 phút + bù giờ; không tính 2 hiệp phụ hoặc loạt luân lưu.",
     "",
     "6. Kết quả",
-    "- Sau T+120m, bot đề xuất tỉ số tính kèo kèm nguồn public cho admin confirm.",
+    "- Sau T+135m, bot đề xuất tỉ số tính kèo kèm nguồn public cho admin confirm.",
     "- Admin confirm thì bot tự settle điểm, cập nhật leaderboard và gửi recap.",
   ].join("\n");
 }
@@ -811,8 +812,8 @@ function buildAiResultProposalPrompt(match, now) {
     "Bạn là trợ lý vận hành cho game dự đoán World Cup nội bộ.",
     "Thời điểm hiện tại: " + formatKickoffTime(reference.toISOString()) + ".",
     "Trận đã khai cuộc cách đây " + elapsedMinutes + " phút (tính từ giờ kickoff bên dưới); trận này KHÔNG còn ở tương lai.",
-    "Vì đã quá T+120 phút nên trận gần như chắc chắn đã kết thúc; hãy web search để tìm TỈ SỐ CUỐI, đừng trả NOT_STARTED khi elapsed > 120 phút.",
-    "Sau T+120 phút, hãy dùng web search như Google để đọc 1-2 nguồn public và đề xuất tỉ số tính kèo cho admin confirm.",
+    "Vì đã quá T+135 phút nên trận gần như chắc chắn đã kết thúc; hãy web search để tìm TỈ SỐ CUỐI, đừng trả NOT_STARTED khi elapsed > 135 phút.",
+    "Sau T+135 phút, hãy dùng web search như Google để đọc 1-2 nguồn public và đề xuất tỉ số tính kèo cho admin confirm.",
     "Luật settle: homeScore/awayScore CHỈ là tỉ số sau 90 phút + bù giờ; KHÔNG tính 2 hiệp phụ hoặc loạt luân lưu.",
     "Nếu nguồn ghi 'hòa 1-1 sau 90 phút, thắng 2-1 sau hiệp phụ, thắng 4-3 luân lưu', hãy trả homeScore/awayScore là 1 và 1; có thể nhắc hiệp phụ/luân lưu trong summary.",
     "Ưu tiên nguồn chính thống/có uy tín như FIFA, trang giải đấu, ESPN, BBC, Reuters hoặc AP.",
@@ -1869,7 +1870,7 @@ function getDryRunFinishTime(matches) {
     var time = toDate(match.kickoffUtc).getTime();
     return Number.isNaN(time) ? latest : Math.max(latest, time);
   }, 0);
-  return new Date(latestKickoff + 120 * 60000);
+  return new Date(latestKickoff + RESULT_PROMPT_DELAY_MINUTES * 60000);
 }
 
 function buildDryRunResultPrompt(match) {

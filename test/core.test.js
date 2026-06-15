@@ -1038,7 +1038,7 @@ test("selects unfinished dry-run matches and computes finish time", () => {
     getDryRunMatchesToFinish(matches).map((match) => match.matchId),
     ["DRY-A", "DRY-B"]
   );
-  assert.equal(getDryRunFinishTime(getDryRunMatchesToFinish(matches)).toISOString(), "2026-06-12T07:55:00.000Z");
+  assert.equal(getDryRunFinishTime(getDryRunMatchesToFinish(matches)).toISOString(), "2026-06-12T08:10:00.000Z");
 });
 
 test("builds and normalizes AI dry-run result payloads", () => {
@@ -1248,7 +1248,7 @@ test("builds AI result proposal prompt for admin confirmation", () => {
   assert.match(prompt, /M001/);
   assert.match(prompt, /Thời điểm hiện tại/);
   assert.match(prompt, /cách đây 124 phút/);
-  assert.match(prompt, /đừng trả NOT_STARTED khi elapsed > 120/);
+  assert.match(prompt, /đừng trả NOT_STARTED khi elapsed > 135/);
 });
 
 test("normalizes and formats AI result proposal for admin verification", () => {
