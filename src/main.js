@@ -882,7 +882,8 @@ function adminSetResult(chatId, actor, args) {
     actor,
     "SET_RESULT"
   );
-  sendTelegramMessage(chatId, "Đã ghi tỉ số tính kèo " + matchId + ": " + homeScore + "-" + awayScore + ".");
+  sendTelegramMessage(chatId, "Đã ghi tỉ số tính kèo " + matchId + ": " + homeScore + "-" + awayScore + ". Đang settle...");
+  settleMatch(matchId, actor, chatId);
 }
 
 function settleMatch(matchId, actor, replyChatId) {
