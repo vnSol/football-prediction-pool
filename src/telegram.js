@@ -82,14 +82,16 @@ function sendMissingPickReminders(match, reminderMinutes) {
       pickedIds[String(pick.telegramUserId)] = true;
     });
 
+  var prefField = Number(reminderMinutes) <= 30 ? "remind30Disabled" : "remind120Disabled";
+
   getActivePlayers().forEach(function (player) {
-    if (!pickedIds[String(player.telegramUserId)]) {
-      sendTelegramMessage(
-        player.telegramUserId,
-        formatMissingPickReminderMessage(match, reminderMinutes),
-        buildPickKeyboard(match)
-      );
-    }
+    if (pickedIds[String(player.telegramUserId)]) return;
+    if (parseBoolean(player[prefField])) return;
+    sendTelegramMessage(
+      player.telegramUserId,
+      formatMissingPickReminderMessage(match, reminderMinutes),
+      buildPickKeyboard(match)
+    );
   });
 }
 

@@ -47,6 +47,47 @@ function loadMainContext(overrides) {
   return { context, sentMessages, recapMessages };
 }
 
+test("setReminders persists the preference patch and echoes settings", () => {
+  const saved = [];
+  const { context, sentMessages } = loadMainContext({
+    parseReminderCommand: () => ({ action: "set", patch: { remind120Disabled: true } }),
+    setPlayerReminderPrefs: (userId, patch) => {
+      saved.push({ userId, patch });
+      return { after: { telegramUserId: userId, remind120Disabled: true } };
+    },
+    formatReminderSettings: (player) => "settings:" + JSON.stringify(player),
+  });
+
+  context.setReminders("123", { telegramUserId: "123" }, ["2h", "off"]);
+
+  assert.deepEqual(saved, [{ userId: "123", patch: { remind120Disabled: true } }]);
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0].text, /remind120Disabled/);
+});
+
+test("setReminders just shows settings when no toggle is given", () => {
+  const saved = [];
+  const { context, sentMessages } = loadMainContext({
+    parseReminderCommand: () => ({ action: "show" }),
+    setPlayerReminderPrefs: (userId, patch) => saved.push({ userId, patch }),
+    formatReminderSettings: () => "current settings",
+  });
+
+  context.setReminders("123", { telegramUserId: "123" }, []);
+
+  assert.deepEqual(saved, []);
+  assert.deepEqual(sentMessages, [{ chatId: "123", text: "current settings" }]);
+});
+
+test("setReminders rejects an unknown player", () => {
+  const { context, sentMessages } = loadMainContext();
+
+  context.setReminders("123", null, ["off"]);
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0].text, /chưa có trong danh sách/);
+});
+
 test("lock_summary sends the generated summary to the configured recap chat", () => {
   const { context, sentMessages, recapMessages } = loadMainContext();
 

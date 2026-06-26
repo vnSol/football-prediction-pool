@@ -100,6 +100,7 @@ function handleMessage(message) {
   if (command.name === "matches") return sendOpenMatches(chatId);
   if (command.name === "leaderboard") return sendTelegramMessage(chatId, formatLeaderboard(getLeaderboard(), 20));
   if (command.name === "mypick") return sendMyPick(chatId, player, command.args[0]);
+  if (command.name === "reminders") return setReminders(chatId, player, command.args);
 
   if (!admin) {
     sendTelegramMessage(chatId, "Lệnh này chỉ dành cho admin.");
@@ -635,6 +636,26 @@ function sendMyPick(chatId, player, matchId) {
     return;
   }
   sendTelegramMessage(chatId, "Pick của bạn: " + sideDisplayName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : ""));
+}
+
+function setReminders(chatId, player, args) {
+  if (!player) {
+    sendTelegramMessage(chatId, "Bạn chưa có trong danh sách người chơi. Dùng /join để tham gia.");
+    return;
+  }
+  var parsed = parseReminderCommand(args);
+  if (parsed.action === "invalid") {
+    sendTelegramMessage(
+      chatId,
+      "Cú pháp: /reminders <on|off> hoặc /reminders <2h|30m> <on|off>"
+    );
+    return;
+  }
+  if (parsed.action === "set") {
+    var result = setPlayerReminderPrefs(player.telegramUserId, parsed.patch, player.telegramUserId);
+    player = (result && result.after) || Object.assign({}, player, parsed.patch);
+  }
+  sendTelegramMessage(chatId, formatReminderSettings(player));
 }
 
 function adminSetOdds(chatId, actor, args) {

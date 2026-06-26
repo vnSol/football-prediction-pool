@@ -10,7 +10,7 @@ var SHEETS = Object.freeze({
 var SHEET_HEADERS = {};
 var AI_MATCH_PROPOSAL_CACHE_PREFIX = "ai_match_proposal:";
 
-SHEET_HEADERS[SHEETS.PLAYERS] = ["telegramUserId", "displayName", "active", "isAdmin"];
+SHEET_HEADERS[SHEETS.PLAYERS] = ["telegramUserId", "displayName", "active", "isAdmin", "remind30Disabled", "remind120Disabled"];
 SHEET_HEADERS[SHEETS.MATCHES] = [
   "matchId",
   "homeTeam",
@@ -291,6 +291,18 @@ function setPlayerActive(telegramUserId, active, actor) {
     { active: Boolean(active) }
   );
   if (result) audit("SET_PLAYER_ACTIVE", "Player", telegramUserId, actor, result.before, result.after);
+  return result;
+}
+
+function setPlayerReminderPrefs(telegramUserId, patch, actor) {
+  var result = updateObject(
+    SHEETS.PLAYERS,
+    function (player) {
+      return String(player.telegramUserId) === String(telegramUserId);
+    },
+    patch
+  );
+  if (result) audit("SET_PLAYER_REMINDER_PREFS", "Player", telegramUserId, actor, result.before, result.after);
   return result;
 }
 

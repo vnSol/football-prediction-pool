@@ -99,6 +99,7 @@ Kickoff times are stored as UTC ISO strings and displayed in Telegram as `YYYY-M
 - `/mypick`: show picks, including missing picks, for matches in the next 24 hours.
 - `/mypick <matchId>`: show current pick for one match.
 - `/leaderboard`: show leaderboard.
+- `/reminders`: show missing-pick reminder settings. `/reminders <on|off>` toggles both; `/reminders <2h|30m> <on|off>` toggles one. Disabled reminders are skipped per player.
 - Inline buttons: group matches show home/draw/away as available; knockout matches show home, away, home + star, and away + star.
 
 Use player commands and pick buttons in direct messages with the bot. The bot ignores `/join`, `/matches`, `/mypick`, `/commands`, and pick callbacks in group chats to avoid group spam.
