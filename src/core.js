@@ -548,6 +548,9 @@ function formatCommands(isAdmin) {
     "/matches - Xem các trận đang mở pick",
     "/mypick - Xem pick của bạn trong 24 giờ tới",
     "/mypick <matchId> - Xem pick của một trận",
+    "/history - Xem lịch sử cược của bạn (20 trận gần nhất)",
+    "/history all - Xem toàn bộ lịch sử cược",
+    "/history csv - Xuất toàn bộ lịch sử dạng CSV",
     "/leaderboard - Xem bảng xếp hạng",
     "/reminders - Xem cài đặt nhắc pick",
     "/reminders <on|off> - Bật/tắt cả 2 nhắc pick (T-2h và T-30m)",
@@ -572,6 +575,7 @@ function formatCommands(isAdmin) {
       "/result <matchId> <home-away> <diễn biến> - Nhập tỉ số tính kèo sau 90' + bù giờ, không hiệp phụ/luân lưu",
       "/settle <matchId> - Chốt điểm",
       "/set_pick <matchId> <telegramUserId> <HOME|AWAY|DEFAULT> - Admin đặt/sửa pick hộ player (DEFAULT = kèo mặc định)",
+      "/player_history <telegramUserId> [all|csv] - Xem lịch sử cược của một player kèm nguồn pick (all = toàn bộ, csv = xuất CSV)",
       "/resettle <matchId> - Tính lại trận đã settle có handicapGoals < 0 (sửa pick mặc định kèo trên), không gửi lại recap",
       "/reset_latest_settle - Undo settle trận đã settle gần nhất và tính lại leaderboard",
       "/recap <matchId> - Gửi lại recap",
@@ -680,6 +684,147 @@ function formatMyUpcomingPicks(input) {
       })
       .join("\n\n")
   );
+}
+
+function hasFinalScore(match) {
+  return (
+    match.finalHomeScore !== "" &&
+    match.finalHomeScore != null &&
+    isFinite(Number(match.finalHomeScore)) &&
+    match.finalAwayScore !== "" &&
+    match.finalAwayScore != null &&
+    isFinite(Number(match.finalAwayScore))
+  );
+}
+
+function pickSourceLabel(source) {
+  if (source === SOURCE.TELEGRAM) return "Player";
+  if (source === SOURCE.AUTO_DEFAULT) return "Auto";
+  if (source === SOURCE.ADMIN) return "Admin";
+  return source ? String(source) : "?";
+}
+
+function buildPickSourceMap(picks) {
+  var map = {};
+  (picks || []).forEach(function (pick) {
+    map[String(pick.matchId) + ":" + String(pick.telegramUserId)] = pick.source;
+  });
+  return map;
+}
+
+function formatBettingHistory(input) {
+  input = input || {};
+  var displayName = input.displayName || "Bạn";
+  var limit = input.all ? Infinity : input.limit > 0 ? input.limit : 20;
+  var showSource = Boolean(input.showSource);
+  var sourceByKey = buildPickSourceMap(input.picks);
+
+  var matchesById = {};
+  (input.matches || []).forEach(function (match) {
+    matchesById[String(match.matchId)] = match;
+  });
+
+  var scores = (input.scores || [])
+    .slice()
+    .sort(function (a, b) {
+      return timestampOrZero(b.settledAt) - timestampOrZero(a.settledAt);
+    });
+
+  if (scores.length === 0) {
+    return "📊 Lịch sử cược: " + displayName + "\nChưa có trận nào đã settle.";
+  }
+
+  var totalPoints = scores.reduce(function (sum, score) {
+    return sum + Number(score.points || 0);
+  }, 0);
+  var wins = scores.filter(function (score) {
+    return parseBoolean(score.correct);
+  }).length;
+
+  var shown = scores.slice(0, limit);
+  var lines = [
+    "📊 Lịch sử cược: " + displayName,
+    "Tổng điểm: " + formatPoints(totalPoints) + " (" + scores.length + " trận, thắng kèo " + wins + ")",
+  ];
+  if (scores.length > shown.length) {
+    lines.push("Hiển thị " + shown.length + " trận gần nhất.");
+  }
+
+  shown.forEach(function (score) {
+    var match = matchesById[String(score.matchId)];
+    if (!match) {
+      lines.push(score.selection + " (" + formatPoints(score.points) + ")");
+      return;
+    }
+    var scoreText = hasFinalScore(match) ? " " + bettingScoreText(match) + " " : " vs ";
+    var homeLabel = sideDisplayName(match, SELECTIONS.HOME);
+    var awayLabel = sideDisplayName(match, SELECTIONS.AWAY);
+    var star = parseBoolean(score.star) ? " ⭐" : "";
+    var resultLabel = parseBoolean(score.correct) ? "Thắng" : "Thua";
+    var summary = sideDisplayName(match, score.selection) + star + " → " + resultLabel + " (" + formatPoints(score.points) + ")";
+    if (showSource) {
+      summary += " · " + pickSourceLabel(sourceByKey[String(score.matchId) + ":" + String(score.telegramUserId)]);
+    }
+    lines.push(homeLabel + scoreText + awayLabel + " · " + summary);
+  });
+
+  return lines.join("\n");
+}
+
+function bettingGivingSide(match) {
+  if (!hasLockedOdds(match)) return null;
+  var handicap = Number(match.handicapGoals || 0);
+  var baseSide = match.handicapSide || match.favoriteSide;
+  return handicap >= 0 ? baseSide : oppositeSide(baseSide);
+}
+
+function bettingScoreText(match) {
+  if (!hasFinalScore(match)) return "";
+  var givingSide = bettingGivingSide(match);
+  var hcap = givingSide ? "(-" + Math.abs(Number(match.handicapGoals || 0)) + ")" : "";
+  var homeNum = (givingSide === SELECTIONS.HOME ? hcap : "") + Number(match.finalHomeScore);
+  var awayNum = Number(match.finalAwayScore) + (givingSide === SELECTIONS.AWAY ? hcap : "");
+  return homeNum + "-" + awayNum;
+}
+
+function csvCell(value) {
+  var text = value == null ? "" : String(value);
+  if (/[",\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+  return text;
+}
+
+function formatBettingHistoryCsv(input) {
+  input = input || {};
+  var showSource = Boolean(input.showSource);
+  var sourceByKey = buildPickSourceMap(input.picks);
+  var matchesById = {};
+  (input.matches || []).forEach(function (match) {
+    matchesById[String(match.matchId)] = match;
+  });
+
+  var scores = (input.scores || [])
+    .slice()
+    .sort(function (a, b) {
+      return timestampOrZero(b.settledAt) - timestampOrZero(a.settledAt);
+    });
+
+  var header = ["home", "score", "away", "pick", "result", "points"];
+  if (showSource) header.push("source");
+
+  var rows = scores.map(function (score) {
+    var match = matchesById[String(score.matchId)];
+    var home = match ? sideDisplayName(match, SELECTIONS.HOME) : "";
+    var away = match ? sideDisplayName(match, SELECTIONS.AWAY) : "";
+    var scoreCol = match ? bettingScoreText(match) : "";
+    var pickName = match ? sideDisplayName(match, score.selection) : score.selection;
+    var pick = pickName + (parseBoolean(score.star) ? " ⭐" : "");
+    var result = parseBoolean(score.correct) ? "Thắng" : "Thua";
+    var cells = [home, scoreCol, away, pick, result, Number(score.points || 0)];
+    if (showSource) cells.push(pickSourceLabel(sourceByKey[String(score.matchId) + ":" + String(score.telegramUserId)]));
+    return cells.map(csvCell).join(",");
+  });
+
+  return [header.join(",")].concat(rows).join("\n");
 }
 
 function formatPickConfirmationMessage(match, pick) {
@@ -2163,6 +2308,8 @@ if (typeof module !== "undefined") {
     formatKickoffTime: formatKickoffTime,
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,
+    formatBettingHistory: formatBettingHistory,
+    formatBettingHistoryCsv: formatBettingHistoryCsv,
     formatMissingPickReminderMessage: formatMissingPickReminderMessage,
     parseReminderCommand: parseReminderCommand,
     formatReminderSettings: formatReminderSettings,

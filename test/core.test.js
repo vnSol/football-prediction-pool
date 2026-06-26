@@ -28,6 +28,8 @@ const {
   formatOpenMatchMessage,
   formatRecap,
   formatMyUpcomingPicks,
+  formatBettingHistory,
+  formatBettingHistoryCsv,
   formatMissingPickReminderMessage,
   parseReminderCommand,
   formatReminderSettings,
@@ -919,6 +921,150 @@ test("formats all picks in the next 24 hours for a player", () => {
       "Kèo: 🇯🇵 Japan chấp 🇧🇷 Brazil 1 Trái",
       "Pick: 🇯🇵 Japan",
     ].join("\n")
+  );
+});
+
+test("formats betting history sorted by most recent settle", () => {
+  assert.equal(
+    formatBettingHistory({
+      displayName: "An",
+      matches: [
+        {
+          matchId: "M1",
+          homeTeam: "Argentina",
+          awayTeam: "Germany",
+          favoriteSide: SELECTIONS.HOME,
+          handicapGoals: 0.5,
+          finalHomeScore: 2,
+          finalAwayScore: 0,
+        },
+        {
+          matchId: "M2",
+          homeTeam: "Brazil",
+          awayTeam: "Japan",
+          favoriteSide: SELECTIONS.AWAY,
+          handicapGoals: 1,
+          finalHomeScore: 1,
+          finalAwayScore: 2,
+        },
+      ],
+      scores: [
+        {
+          matchId: "M1",
+          selection: SELECTIONS.HOME,
+          star: true,
+          correct: true,
+          points: 2,
+          settledAt: "2026-06-10T20:00:00.000Z",
+        },
+        {
+          matchId: "M2",
+          selection: SELECTIONS.AWAY,
+          star: false,
+          correct: false,
+          points: 0,
+          settledAt: "2026-06-12T20:00:00.000Z",
+        },
+      ],
+    }),
+    [
+      "📊 Lịch sử cược: An",
+      "Tổng điểm: +2 (2 trận, thắng kèo 1)",
+      "🇧🇷 Brazil 1-2(-1) 🇯🇵 Japan · 🇯🇵 Japan → Thua (0)",
+      "🇦🇷 Argentina (-0.5)2-0 🇩🇪 Germany · 🇦🇷 Argentina ⭐ → Thắng (+2)",
+    ].join("\n")
+  );
+});
+
+test("betting history caps at 20 by default but shows all with all=true", () => {
+  const scores = [];
+  for (let i = 0; i < 25; i += 1) {
+    scores.push({
+      matchId: "M" + i,
+      selection: SELECTIONS.HOME,
+      correct: true,
+      points: 1,
+      settledAt: "2026-06-" + String(10 + (i % 20)).padStart(2, "0") + "T20:00:00.000Z",
+    });
+  }
+
+  const capped = formatBettingHistory({ displayName: "An", scores });
+  assert.equal(capped.split("\n").length, 2 + 1 + 20); // header + summary + cap-note + 20 rows
+  assert.ok(capped.includes("Hiển thị 20 trận gần nhất."));
+
+  const full = formatBettingHistory({ displayName: "An", scores, all: true });
+  assert.equal(full.split("\n").length, 2 + 25); // header + summary + 25 rows
+  assert.ok(!full.includes("Hiển thị"));
+});
+
+test("formats betting history as csv", () => {
+  assert.equal(
+    formatBettingHistoryCsv({
+      matches: [
+        {
+          matchId: "M1",
+          homeTeam: "Argentina",
+          awayTeam: "Germany",
+          favoriteSide: SELECTIONS.HOME,
+          handicapGoals: 0.5,
+          finalHomeScore: 2,
+          finalAwayScore: 0,
+        },
+      ],
+      scores: [
+        {
+          matchId: "M1",
+          selection: SELECTIONS.HOME,
+          star: true,
+          correct: true,
+          points: 2,
+          settledAt: "2026-06-10T20:00:00.000Z",
+        },
+      ],
+    }),
+    [
+      "home,score,away,pick,result,points",
+      "🇦🇷 Argentina,(-0.5)2-0,🇩🇪 Germany,🇦🇷 Argentina ⭐,Thắng,2",
+    ].join("\n")
+  );
+});
+
+test("adds pick source column/field when showSource is set", () => {
+  const matches = [
+    {
+      matchId: "M1",
+      homeTeam: "Argentina",
+      awayTeam: "Germany",
+      favoriteSide: SELECTIONS.HOME,
+      handicapGoals: 0.5,
+      finalHomeScore: 2,
+      finalAwayScore: 0,
+    },
+  ];
+  const scores = [
+    { matchId: "M1", telegramUserId: "u1", selection: SELECTIONS.HOME, correct: true, points: 1, settledAt: "2026-06-10T20:00:00.000Z" },
+  ];
+  const picks = [{ matchId: "M1", telegramUserId: "u1", source: "auto_default" }];
+
+  assert.equal(
+    formatBettingHistoryCsv({ matches, scores, picks, showSource: true }),
+    [
+      "home,score,away,pick,result,points,source",
+      "🇦🇷 Argentina,(-0.5)2-0,🇩🇪 Germany,🇦🇷 Argentina,Thắng,1,Auto",
+    ].join("\n")
+  );
+
+  assert.ok(
+    formatBettingHistory({ displayName: "An", matches, scores, picks, showSource: true }).includes(
+      "🇦🇷 Argentina → Thắng (+1) · Auto"
+    )
+  );
+});
+
+test("formats empty betting history", () => {
+  assert.equal(
+    formatBettingHistory({ displayName: "An", scores: [] }),
+    "📊 Lịch sử cược: An\nChưa có trận nào đã settle."
   );
 });
 

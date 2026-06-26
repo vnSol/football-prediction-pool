@@ -405,6 +405,12 @@ function removeScoreRowsForMatch(matchId, actor) {
   return removed;
 }
 
+function getScoresForPlayer(telegramUserId) {
+  return readObjects(SHEETS.SCORES).filter(function (score) {
+    return String(score.telegramUserId) === String(telegramUserId);
+  });
+}
+
 function getLeaderboard() {
   var playersById = {};
   readObjects(SHEETS.PLAYERS).forEach(function (player) {
