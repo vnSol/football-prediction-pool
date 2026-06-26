@@ -290,3 +290,182 @@ test("reset_latest_settle clears score rows and unlocks latest settled match", (
     },
   ]);
 });
+
+test("resettle flips wrong auto_default picks and re-settles a negative-handicap match without recap", () => {
+  const upserts = [];
+  const removals = [];
+  const appended = [];
+  const audits = [];
+  const match = {
+    matchId: "NEG",
+    status: "SETTLED",
+    finalHomeScore: 0,
+    finalAwayScore: 3,
+    handicapGoals: -2.5,
+    favoriteSide: "HOME",
+    handicapSide: "HOME",
+  };
+  const { context, sentMessages, recapMessages } = loadMainContext({
+    getMatchById: () => match,
+    getPicks: () => [
+      { matchId: "NEG", telegramUserId: "101", selection: "HOME", source: "auto_default" },
+      { matchId: "NEG", telegramUserId: "102", selection: "AWAY", source: "manual" },
+    ],
+    SOURCE: { AUTO_DEFAULT: "auto_default" },
+    getDefaultPickSelection: () => "AWAY",
+    getPlayerByTelegramId: (id) => ({ telegramUserId: id }),
+    upsertPick: (m, player, selection, star, source, actor) =>
+      upserts.push({ matchId: m.matchId, telegramUserId: player.telegramUserId, selection, star, source, actor }),
+    buildResetSettlementPatch: () => ({ status: "LOCKED", handicapOutcome: "", settledAt: "" }),
+    removeScoreRowsForMatch: (matchId, actor) => {
+      removals.push({ matchId, actor });
+      return 2;
+    },
+    appendScoreRows: (rows) => appended.push(rows),
+    scorePick: () => ({ correct: true, points: 1, outcome: "AWAY" }),
+    getHandicapOutcome: () => "AWAY",
+    parseBoolean: (value) => Boolean(value),
+    updateMatch: () => {},
+    audit: (action, entityType, entityId, actor, before, after) =>
+      audits.push({ action, entityType, entityId, actor, before, after }),
+  });
+
+  context.adminResettle("-100123", "42", ["NEG"]);
+
+  assert.deepEqual(removals, [{ matchId: "NEG", actor: "42" }]);
+  assert.deepEqual(upserts, [
+    { matchId: "NEG", telegramUserId: "101", selection: "AWAY", star: false, source: "auto_default", actor: "42" },
+  ]);
+  assert.equal(appended.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(audits)), [
+    {
+      action: "RESETTLE_MATCH",
+      entityType: "Match",
+      entityId: "NEG",
+      actor: "42",
+      before: { handicapGoals: -2.5, removedScoreRows: 2 },
+      after: { flippedCount: 1, flippedPicks: [{ telegramUserId: "101", from: "HOME", to: "AWAY" }] },
+    },
+  ]);
+  assert.deepEqual(recapMessages, []);
+  assert.deepEqual(sentMessages, [
+    { chatId: "-100123", text: "Đã resettle NEG: sửa 1 pick mặc định, tính lại điểm. Leaderboard đã đồng bộ." },
+  ]);
+});
+
+test("resettle refuses matches with non-negative handicap", () => {
+  const removals = [];
+  const { context, sentMessages } = loadMainContext({
+    getMatchById: () => ({
+      matchId: "POS",
+      status: "SETTLED",
+      finalHomeScore: 2,
+      finalAwayScore: 0,
+      handicapGoals: 0.5,
+    }),
+    removeScoreRowsForMatch: (matchId, actor) => {
+      removals.push({ matchId, actor });
+      return 0;
+    },
+  });
+
+  context.adminResettle("-100123", "42", ["POS"]);
+
+  assert.deepEqual(removals, []);
+  assert.deepEqual(sentMessages, [
+    {
+      chatId: "-100123",
+      text: "/resettle chỉ dùng cho trận có handicapGoals < 0 (sửa pick mặc định kèo trên bị sai).",
+    },
+  ]);
+});
+
+test("set_pick records an admin pick for a specific side", () => {
+  const upserts = [];
+  const match = { matchId: "M001", status: "LOCKED", favoriteSide: "HOME", handicapSide: "HOME", handicapGoals: -0.5 };
+  const { context, sentMessages } = loadMainContext({
+    STATUSES: { LOCKED: "LOCKED", SETTLED: "SETTLED" },
+    SOURCE: { TELEGRAM: "telegram", AUTO_DEFAULT: "auto_default", ADMIN: "admin" },
+    getMatchById: () => match,
+    getPlayerByTelegramId: (id) => ({ telegramUserId: id, displayName: "Yen" }),
+    isValidSelection: (value) => value === "HOME" || value === "AWAY",
+    getDefaultPickSelection: () => "AWAY",
+    sideDisplayName: (m, side) => side,
+    upsertPick: (m, player, selection, star, source, actor) => {
+      upserts.push({ matchId: m.matchId, telegramUserId: player.telegramUserId, selection, star, source, actor });
+      return { selection };
+    },
+  });
+
+  context.adminSetPick("-100123", "42", ["M001", "7924581715", "away"]);
+
+  assert.deepEqual(upserts, [
+    { matchId: "M001", telegramUserId: "7924581715", selection: "AWAY", star: false, source: "admin", actor: "42" },
+  ]);
+  assert.deepEqual(sentMessages, [
+    { chatId: "-100123", text: "Đã đặt pick cho Yen ở M001: AWAY." },
+  ]);
+});
+
+test("set_pick with DEFAULT applies the auto-default selection", () => {
+  const upserts = [];
+  const match = { matchId: "M001", status: "LOCKED", favoriteSide: "HOME", handicapSide: "HOME", handicapGoals: 0 };
+  const { context, sentMessages } = loadMainContext({
+    STATUSES: { LOCKED: "LOCKED", SETTLED: "SETTLED" },
+    SOURCE: { TELEGRAM: "telegram", AUTO_DEFAULT: "auto_default", ADMIN: "admin" },
+    getMatchById: () => match,
+    getPlayerByTelegramId: (id) => ({ telegramUserId: id, displayName: "Yen" }),
+    isValidSelection: (value) => value === "HOME" || value === "AWAY",
+    getDefaultPickSelection: () => "HOME",
+    sideDisplayName: (m, side) => side,
+    upsertPick: (m, player, selection, star, source, actor) => {
+      upserts.push({ matchId: m.matchId, telegramUserId: player.telegramUserId, selection, star, source, actor });
+      return { selection };
+    },
+  });
+
+  context.adminSetPick("-100123", "42", ["M001", "7924581715", "default"]);
+
+  assert.deepEqual(upserts, [
+    { matchId: "M001", telegramUserId: "7924581715", selection: "HOME", star: false, source: "auto_default", actor: "42" },
+  ]);
+  assert.deepEqual(sentMessages, [
+    { chatId: "-100123", text: "Đã đặt pick cho Yen ở M001: HOME (mặc định)." },
+  ]);
+});
+
+test("set_pick refuses a settled match", () => {
+  const upserts = [];
+  const { context, sentMessages } = loadMainContext({
+    STATUSES: { LOCKED: "LOCKED", SETTLED: "SETTLED" },
+    SOURCE: { TELEGRAM: "telegram", AUTO_DEFAULT: "auto_default", ADMIN: "admin" },
+    getMatchById: () => ({ matchId: "M001", status: "SETTLED" }),
+    getPlayerByTelegramId: (id) => ({ telegramUserId: id, displayName: "Yen" }),
+    isValidSelection: (value) => value === "HOME" || value === "AWAY",
+    upsertPick: (...args) => upserts.push(args),
+  });
+
+  context.adminSetPick("-100123", "42", ["M001", "7924581715", "HOME"]);
+
+  assert.deepEqual(upserts, []);
+  assert.deepEqual(sentMessages, [
+    { chatId: "-100123", text: "Trận đã settle. Dùng /resettle hoặc /reset_latest_settle trước khi sửa pick." },
+  ]);
+});
+
+test("set_pick reports an unknown player", () => {
+  const upserts = [];
+  const { context, sentMessages } = loadMainContext({
+    STATUSES: { LOCKED: "LOCKED", SETTLED: "SETTLED" },
+    getMatchById: () => ({ matchId: "M001", status: "LOCKED" }),
+    getPlayerByTelegramId: () => null,
+    upsertPick: (...args) => upserts.push(args),
+  });
+
+  context.adminSetPick("-100123", "42", ["M001", "999", "HOME"]);
+
+  assert.deepEqual(upserts, []);
+  assert.deepEqual(sentMessages, [
+    { chatId: "-100123", text: "Không tìm thấy player 999." },
+  ]);
+});

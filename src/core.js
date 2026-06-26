@@ -287,8 +287,12 @@ function buildDryRunMatchRefreshPatch(match) {
 }
 
 function getDefaultPickSelection(match) {
-  if (match && match.handicapGoals !== "" && match.handicapGoals != null && Number(match.handicapGoals) === 0) return SELECTIONS.HOME;
-  return isValidSelection(match && match.favoriteSide) ? match.favoriteSide : SELECTIONS.HOME;
+  var side = isValidSelection(match && match.favoriteSide) ? match.favoriteSide : SELECTIONS.HOME;
+  if (!match || match.handicapGoals === "" || match.handicapGoals == null) return side;
+  var handicap = Number(match.handicapGoals);
+  if (handicap === 0) return SELECTIONS.HOME;
+  var handicapSide = match.handicapSide || side;
+  return handicap >= 0 ? handicapSide : oppositeSide(handicapSide);
 }
 
 function canSetOdds(match, now) {
@@ -564,6 +568,8 @@ function formatCommands(isAdmin) {
       "/ai_result <matchId> - AI tìm tỉ số tính kèo, gửi đề xuất Y/N; confirm thì settle và recap",
       "/result <matchId> <home-away> <diễn biến> - Nhập tỉ số tính kèo sau 90' + bù giờ, không hiệp phụ/luân lưu",
       "/settle <matchId> - Chốt điểm",
+      "/set_pick <matchId> <telegramUserId> <HOME|AWAY|DEFAULT> - Admin đặt/sửa pick hộ player (DEFAULT = kèo mặc định)",
+      "/resettle <matchId> - Tính lại trận đã settle có handicapGoals < 0 (sửa pick mặc định kèo trên), không gửi lại recap",
       "/reset_latest_settle - Undo settle trận đã settle gần nhất và tính lại leaderboard",
       "/recap <matchId> - Gửi lại recap",
       "/reset_sheet - Reset dữ liệu sheet",
@@ -813,10 +819,10 @@ function buildAiResultProposalPrompt(match, now) {
     "Thời điểm hiện tại: " + formatKickoffTime(reference.toISOString()) + ".",
     "Trận đã khai cuộc cách đây " + elapsedMinutes + " phút (tính từ giờ kickoff bên dưới); trận này KHÔNG còn ở tương lai.",
     "Vì đã quá T+135 phút nên trận gần như chắc chắn đã kết thúc; hãy web search để tìm TỈ SỐ CUỐI, đừng trả NOT_STARTED khi elapsed > 135 phút.",
-    "Sau T+135 phút, hãy dùng web search như Google để đọc 1-2 nguồn public và đề xuất tỉ số tính kèo cho admin confirm.",
+    "Sau T+135 phút, hãy web search thẳng trên Google (vd query 'home team vs away team score' hoặc tên 2 đội + 'kết quả') vì Google cập nhật tỉ số gần như realtime; đọc thẳng thẻ kết quả/scoreboard của Google ngay trên trang tìm kiếm để lấy tỉ số cuối.",
     "Luật settle: homeScore/awayScore CHỈ là tỉ số sau 90 phút + bù giờ; KHÔNG tính 2 hiệp phụ hoặc loạt luân lưu.",
     "Nếu nguồn ghi 'hòa 1-1 sau 90 phút, thắng 2-1 sau hiệp phụ, thắng 4-3 luân lưu', hãy trả homeScore/awayScore là 1 và 1; có thể nhắc hiệp phụ/luân lưu trong summary.",
-    "Ưu tiên nguồn chính thống/có uy tín như FIFA, trang giải đấu, ESPN, BBC, Reuters hoặc AP.",
+    "Ưu tiên thẻ kết quả của Google; có thể đối chiếu thêm nguồn chính thống như FIFA, trang giải đấu, ESPN, BBC, Reuters hoặc AP nếu cần.",
     "Chỉ đề xuất khi nguồn public đủ rõ; nếu chưa rõ thì status UNKNOWN và homeScore/awayScore là null.",
     "Không bịa tỉ số, trạng thái, diễn biến hoặc nguồn.",
     "Trả về JSON duy nhất, không markdown, không giải thích thêm.",
