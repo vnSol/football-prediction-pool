@@ -122,6 +122,8 @@ function handleMessage(message) {
   if (command.name === "ai_result") return adminAiResult(chatId, message.from.id, command.args);
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
   if (command.name === "settle") return settleMatch(command.args[0], message.from.id, chatId);
+  if (command.name === "set_pick") return adminSetPick(chatId, message.from.id, command.args);
+  if (command.name === "resettle") return adminResettle(chatId, message.from.id, command.args);
   if (command.name === "reset_latest_settle" || command.name === "reset_settle_latest") return adminResetLatestSettle(chatId, message.from.id);
   if (command.name === "recap") return resendRecap(command.args[0], chatId);
 }
@@ -897,6 +899,14 @@ function settleMatch(matchId, actor, replyChatId) {
     return;
   }
 
+  settleMatchCore(match, actor);
+  var recap = buildAiRecapOrFallback(matchId);
+  sendRecapToConfiguredChats(recap);
+  if (replyChatId) sendTelegramMessage(replyChatId, "Đã settle và gửi recap cho " + matchId + ".");
+}
+
+function settleMatchCore(match, actor) {
+  var matchId = match.matchId;
   var score = { homeScore: Number(match.finalHomeScore), awayScore: Number(match.finalAwayScore) };
   var now = new Date().toISOString();
   var rows = getPicks()
@@ -921,10 +931,92 @@ function settleMatch(matchId, actor, replyChatId) {
   appendScoreRows(rows);
   var outcome = rows.length ? rows[0].outcome : getHandicapOutcome(match, score);
   updateMatch(matchId, { status: STATUSES.SETTLED, handicapOutcome: outcome, settledAt: now }, actor, "SETTLE_MATCH");
+}
 
-  var recap = buildAiRecapOrFallback(matchId);
-  sendRecapToConfiguredChats(recap);
-  if (replyChatId) sendTelegramMessage(replyChatId, "Đã settle và gửi recap cho " + matchId + ".");
+function adminSetPick(chatId, actor, args) {
+  var matchId = args[0];
+  var telegramUserId = args[1];
+  var token = String(args[2] || "").toUpperCase();
+  var match = getMatchById(matchId);
+  if (!match) {
+    sendTelegramMessage(chatId, "Cú pháp: /set_pick <matchId> <telegramUserId> <HOME|AWAY|DEFAULT>");
+    return;
+  }
+  var player = getPlayerByTelegramId(telegramUserId);
+  if (!player) {
+    sendTelegramMessage(chatId, "Không tìm thấy player " + telegramUserId + ".");
+    return;
+  }
+  if (match.status === STATUSES.SETTLED) {
+    sendTelegramMessage(chatId, "Trận đã settle. Dùng /resettle hoặc /reset_latest_settle trước khi sửa pick.");
+    return;
+  }
+  var selection;
+  var source;
+  if (token === "DEFAULT" || token === "AUTO") {
+    selection = getDefaultPickSelection(match);
+    source = SOURCE.AUTO_DEFAULT;
+  } else if (isValidSelection(token)) {
+    selection = token;
+    source = SOURCE.ADMIN;
+  } else {
+    sendTelegramMessage(chatId, "Cú pháp: /set_pick <matchId> <telegramUserId> <HOME|AWAY|DEFAULT>");
+    return;
+  }
+  var pick = upsertPick(match, player, selection, false, source, actor);
+  sendTelegramMessage(
+    chatId,
+    "Đã đặt pick cho " + player.displayName + " ở " + matchId + ": " + sideDisplayName(match, pick.selection) +
+      (source === SOURCE.AUTO_DEFAULT ? " (mặc định)" : "") + "."
+  );
+}
+
+function adminResettle(chatId, actor, args) {
+  var matchId = args[0];
+  var match = getMatchById(matchId);
+  if (!match || match.status !== STATUSES.SETTLED) {
+    sendTelegramMessage(chatId, "Không resettle được: thiếu trận hoặc trận chưa settle.");
+    return;
+  }
+  if (match.finalHomeScore === "" || match.finalAwayScore === "") {
+    sendTelegramMessage(chatId, "Chưa có tỉ số tính kèo.");
+    return;
+  }
+  if (!(Number(match.handicapGoals) < 0)) {
+    sendTelegramMessage(chatId, "/resettle chỉ dùng cho trận có handicapGoals < 0 (sửa pick mặc định kèo trên bị sai).");
+    return;
+  }
+
+  var removedRows = removeScoreRowsForMatch(matchId, actor);
+  updateMatch(matchId, buildResetSettlementPatch(), actor, "RESETTLE_RESET");
+  match = getMatchById(matchId);
+
+  var flips = [];
+  getPicks()
+    .filter(function (pick) {
+      return String(pick.matchId) === String(matchId) && pick.source === SOURCE.AUTO_DEFAULT;
+    })
+    .forEach(function (pick) {
+      var correct = getDefaultPickSelection(match);
+      if (pick.selection === correct) return;
+      var player = getPlayerByTelegramId(pick.telegramUserId);
+      if (!player) return;
+      upsertPick(match, player, correct, false, SOURCE.AUTO_DEFAULT, actor);
+      flips.push({ telegramUserId: String(pick.telegramUserId), from: pick.selection, to: correct });
+    });
+
+  settleMatchCore(match, actor);
+
+  audit(
+    "RESETTLE_MATCH",
+    "Match",
+    matchId,
+    actor,
+    { handicapGoals: match.handicapGoals, removedScoreRows: removedRows },
+    { flippedCount: flips.length, flippedPicks: flips }
+  );
+
+  sendTelegramMessage(chatId, "Đã resettle " + matchId + ": sửa " + flips.length + " pick mặc định, tính lại điểm. Leaderboard đã đồng bộ.");
 }
 
 function adminResetLatestSettle(chatId, actor) {

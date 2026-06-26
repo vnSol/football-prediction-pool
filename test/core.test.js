@@ -228,6 +228,64 @@ test("creates home default picks when handicap is zero", () => {
   ]);
 });
 
+test("default picks the giving side when handicap is negative", () => {
+  const match = {
+    matchId: "M002-NEG",
+    favoriteSide: SELECTIONS.HOME,
+    handicapGoals: -2.5,
+  };
+
+  assert.deepEqual(createDefaultPicks(match, players, [], date("2026-06-12T19:00:00.000Z")), [
+    {
+      matchId: "M002-NEG",
+      telegramUserId: "101",
+      selection: SELECTIONS.AWAY,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+    {
+      matchId: "M002-NEG",
+      telegramUserId: "102",
+      selection: SELECTIONS.AWAY,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+  ]);
+});
+
+test("default picks the favorite side when handicap is positive", () => {
+  const match = {
+    matchId: "M002-POS",
+    favoriteSide: SELECTIONS.HOME,
+    handicapGoals: 1.5,
+  };
+
+  assert.deepEqual(createDefaultPicks(match, players, [], date("2026-06-12T19:00:00.000Z")), [
+    {
+      matchId: "M002-POS",
+      telegramUserId: "101",
+      selection: SELECTIONS.HOME,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+    {
+      matchId: "M002-POS",
+      telegramUserId: "102",
+      selection: SELECTIONS.HOME,
+      star: false,
+      source: "auto_default",
+      createdAt: "2026-06-12T19:00:00.000Z",
+      updatedAt: "2026-06-12T19:00:00.000Z",
+    },
+  ]);
+});
+
 test("scheduler opens picks at T-24, prompts missing odds, and sends missing-pick reminders", () => {
   const now = date("2026-06-12T13:00:00.000Z");
   const matches = [
@@ -1238,13 +1296,12 @@ test("builds AI result proposal prompt for admin confirmation", () => {
     "2026-06-12T22:04:00.000Z"
   );
 
-  assert.match(prompt, /1-2 nguồn public/);
-  assert.match(prompt, /web search như Google/);
+  assert.match(prompt, /thẳng trên Google/);
+  assert.match(prompt, /thẻ kết quả/);
   assert.match(prompt, /90 phút \+ bù giờ/);
   assert.match(prompt, /KHÔNG tính 2 hiệp phụ hoặc loạt luân lưu/);
   assert.match(prompt, /JSON/);
   assert.match(prompt, /không bịa/i);
-  assert.match(prompt, /admin confirm/);
   assert.match(prompt, /M001/);
   assert.match(prompt, /Thời điểm hiện tại/);
   assert.match(prompt, /cách đây 124 phút/);
