@@ -29,6 +29,8 @@ const {
   formatRecap,
   formatMyUpcomingPicks,
   formatMissingPickReminderMessage,
+  parseReminderCommand,
+  formatReminderSettings,
   formatRules,
   formatPickConfirmationMessage,
   formatJoinAdminMessage,
@@ -552,6 +554,47 @@ test("formats leaderboard in rank order", () => {
   );
 });
 
+test("parseReminderCommand shows settings when no args", () => {
+  assert.deepEqual(parseReminderCommand([]), { action: "show" });
+});
+
+test("parseReminderCommand toggles both reminders", () => {
+  assert.deepEqual(parseReminderCommand(["off"]), {
+    action: "set",
+    patch: { remind30Disabled: true, remind120Disabled: true },
+  });
+  assert.deepEqual(parseReminderCommand(["on"]), {
+    action: "set",
+    patch: { remind30Disabled: false, remind120Disabled: false },
+  });
+});
+
+test("parseReminderCommand toggles a single reminder", () => {
+  assert.deepEqual(parseReminderCommand(["30m", "off"]), {
+    action: "set",
+    patch: { remind30Disabled: true },
+  });
+  assert.deepEqual(parseReminderCommand(["2h", "on"]), {
+    action: "set",
+    patch: { remind120Disabled: false },
+  });
+  assert.deepEqual(parseReminderCommand(["120", "off"]), {
+    action: "set",
+    patch: { remind120Disabled: true },
+  });
+});
+
+test("parseReminderCommand rejects missing on/off state", () => {
+  assert.deepEqual(parseReminderCommand(["2h"]), { action: "invalid" });
+  assert.deepEqual(parseReminderCommand(["bogus"]), { action: "invalid" });
+});
+
+test("formatReminderSettings shows on/off per reminder", () => {
+  var text = formatReminderSettings({ remind30Disabled: true, remind120Disabled: false });
+  assert.match(text, /Nhắc T-2h: BẬT/);
+  assert.match(text, /Nhắc T-30m: TẮT/);
+});
+
 test("formats commands by account role", () => {
   var playerCommands = formatCommands(false);
   var adminCommands = formatCommands(true);
@@ -560,6 +603,7 @@ test("formats commands by account role", () => {
   assert.match(playerCommands, /\/rules/);
   assert.match(playerCommands, /\/matches/);
   assert.match(playerCommands, /\/mypick/);
+  assert.match(playerCommands, /\/reminders/);
   assert.doesNotMatch(playerCommands, /\/set_odds/);
 
   assert.match(adminCommands, /\/matches/);

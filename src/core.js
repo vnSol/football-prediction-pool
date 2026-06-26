@@ -549,6 +549,9 @@ function formatCommands(isAdmin) {
     "/mypick - Xem pick của bạn trong 24 giờ tới",
     "/mypick <matchId> - Xem pick của một trận",
     "/leaderboard - Xem bảng xếp hạng",
+    "/reminders - Xem cài đặt nhắc pick",
+    "/reminders <on|off> - Bật/tắt cả 2 nhắc pick (T-2h và T-30m)",
+    "/reminders <2h|30m> <on|off> - Bật/tắt riêng một nhắc pick",
   ];
 
   if (isAdmin) {
@@ -697,6 +700,58 @@ function formatMissingPickReminderMessage(match, reminderMinutes) {
     sideDisplayName(match, SELECTIONS.AWAY) +
     ". Chưa pick thì hệ thống sẽ auto chọn đội kèo trên lúc bóng lăn."
   );
+}
+
+function parseReminderCommand(args) {
+  var tokens = (args || []).map(function (arg) {
+    return String(arg || "").toLowerCase();
+  });
+
+  if (tokens.length === 0) return { action: "show" };
+
+  var which = null;
+  var state = null;
+
+  tokens.forEach(function (token) {
+    if (token === "on" || token === "off") {
+      state = token;
+    } else if (token === "30m" || token === "30" || token === "t30" || token === "t-30m") {
+      which = "30";
+    } else if (token === "2h" || token === "120" || token === "120m" || token === "t2h" || token === "t-2h") {
+      which = "120";
+    }
+  });
+
+  if (state === null) return { action: "invalid" };
+
+  var disabled = state === "off";
+  var patch = {};
+  if (which === "30") {
+    patch.remind30Disabled = disabled;
+  } else if (which === "120") {
+    patch.remind120Disabled = disabled;
+  } else {
+    patch.remind30Disabled = disabled;
+    patch.remind120Disabled = disabled;
+  }
+
+  return { action: "set", patch: patch };
+}
+
+function formatReminderSettings(player) {
+  var remind30Off = parseBoolean(player.remind30Disabled);
+  var remind120Off = parseBoolean(player.remind120Disabled);
+  return [
+    "⏰ Cài đặt nhắc pick",
+    "- Nhắc T-2h: " + (remind120Off ? "TẮT" : "BẬT"),
+    "- Nhắc T-30m: " + (remind30Off ? "TẮT" : "BẬT"),
+    "",
+    "Đổi cài đặt:",
+    "/reminders off - tắt cả 2",
+    "/reminders on - bật cả 2",
+    "/reminders 2h off - chỉ tắt nhắc T-2h",
+    "/reminders 30m off - chỉ tắt nhắc T-30m",
+  ].join("\n");
 }
 
 function formatPoints(points) {
@@ -2109,6 +2164,8 @@ if (typeof module !== "undefined") {
     formatLeaderboard: formatLeaderboard,
     formatMyUpcomingPicks: formatMyUpcomingPicks,
     formatMissingPickReminderMessage: formatMissingPickReminderMessage,
+    parseReminderCommand: parseReminderCommand,
+    formatReminderSettings: formatReminderSettings,
     formatPickConfirmationMessage: formatPickConfirmationMessage,
     formatRules: formatRules,
     formatJoinAdminMessage: formatJoinAdminMessage,
