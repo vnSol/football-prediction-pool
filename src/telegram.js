@@ -21,6 +21,22 @@ function sendTelegramMessage(chatId, text, replyMarkup) {
   return telegramApi("sendMessage", payload);
 }
 
+function sendTelegramMessageChunked(chatId, text) {
+  var maxLen = 4000;
+  var lines = String(text).split("\n");
+  var buffer = "";
+  var last = null;
+  lines.forEach(function (line) {
+    if (buffer && buffer.length + 1 + line.length > maxLen) {
+      last = sendTelegramMessage(chatId, buffer);
+      buffer = "";
+    }
+    buffer = buffer ? buffer + "\n" + line : line;
+  });
+  if (buffer) last = sendTelegramMessage(chatId, buffer);
+  return last;
+}
+
 function editTelegramMessageText(chatId, messageId, text, replyMarkup) {
   var payload = {
     chat_id: String(chatId),

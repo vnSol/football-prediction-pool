@@ -100,6 +100,7 @@ function handleMessage(message) {
   if (command.name === "matches") return sendOpenMatches(chatId);
   if (command.name === "leaderboard") return sendTelegramMessage(chatId, formatLeaderboard(getLeaderboard(), 20));
   if (command.name === "mypick") return sendMyPick(chatId, player, command.args[0]);
+  if (command.name === "history") return sendBettingHistory(chatId, player, command.args);
   if (command.name === "reminders") return setReminders(chatId, player, command.args);
 
   if (!admin) {
@@ -124,6 +125,7 @@ function handleMessage(message) {
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
   if (command.name === "settle") return settleMatch(command.args[0], message.from.id, chatId);
   if (command.name === "set_pick") return adminSetPick(chatId, message.from.id, command.args);
+  if (command.name === "player_history") return adminPlayerHistory(chatId, command.args);
   if (command.name === "resettle") return adminResettle(chatId, message.from.id, command.args);
   if (command.name === "reset_latest_settle" || command.name === "reset_settle_latest") return adminResetLatestSettle(chatId, message.from.id);
   if (command.name === "recap") return resendRecap(command.args[0], chatId);
@@ -636,6 +638,50 @@ function sendMyPick(chatId, player, matchId) {
     return;
   }
   sendTelegramMessage(chatId, "Pick của bạn: " + sideDisplayName(match, pick.selection) + (parseBoolean(pick.star) ? " ⭐" : ""));
+}
+
+function hasHistoryFlag(args, flag) {
+  return (args || []).some(function (arg) {
+    return String(arg || "").toLowerCase() === flag;
+  });
+}
+
+function renderBettingHistory(displayName, telegramUserId, args, showSource) {
+  var input = {
+    displayName: displayName,
+    matches: getMatches(),
+    scores: getScoresForPlayer(telegramUserId),
+    all: hasHistoryFlag(args, "all") || hasHistoryFlag(args, "csv"),
+    showSource: Boolean(showSource),
+  };
+  if (showSource) {
+    input.picks = getPicks().filter(function (pick) {
+      return String(pick.telegramUserId) === String(telegramUserId);
+    });
+  }
+  return hasHistoryFlag(args, "csv") ? formatBettingHistoryCsv(input) : formatBettingHistory(input);
+}
+
+function sendBettingHistory(chatId, player, args) {
+  if (!player) {
+    sendTelegramMessage(chatId, "Bạn chưa có trong danh sách người chơi. Dùng /join để tham gia.");
+    return;
+  }
+  sendTelegramMessageChunked(chatId, renderBettingHistory(player.displayName, player.telegramUserId, args, false));
+}
+
+function adminPlayerHistory(chatId, args) {
+  var telegramUserId = args[0];
+  if (!telegramUserId) {
+    sendTelegramMessage(chatId, "Cú pháp: /player_history <telegramUserId> [all|csv]");
+    return;
+  }
+  var target = getPlayerByTelegramId(telegramUserId);
+  if (!target) {
+    sendTelegramMessage(chatId, "Không tìm thấy player " + telegramUserId + ".");
+    return;
+  }
+  sendTelegramMessageChunked(chatId, renderBettingHistory(target.displayName, target.telegramUserId, args.slice(1), true));
 }
 
 function setReminders(chatId, player, args) {
