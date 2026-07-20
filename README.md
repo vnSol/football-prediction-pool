@@ -121,6 +121,7 @@ Use player commands and pick buttons in direct messages with the bot. The bot ig
 - `/lock_summary <matchId>`
 - `/ai_result <matchId>`
 - `/result <matchId> <home-away after 90m+stoppage, no ET/penalties> <event 1; event 2; event 3>`
+- `/resettle_result <matchId> <correct home-away after 90m+stoppage, no ET/penalties> <event 1; event 2; event 3>`
 - `/settle <matchId>`
 - `/reset_latest_settle`
 - `/recap <matchId>`
@@ -167,6 +168,8 @@ Use `_` for spaces in team names when needed; the bot stores `_` as spaces.
 `/reset_sheet` shows sheet-name buttons and asks for confirmation before clearing data rows. It keeps headers and protection in place.
 
 `/reset_latest_settle` undoes the most recently settled match: it clears that match's rows from `Scores`, moves the match back to `LOCKED`, and clears `handicapOutcome`/`settledAt`. The entered result stays in `Matches`, so `/settle <matchId>` can be run again after corrections.
+
+`/resettle_result <matchId> <home-away> <events>` corrects a bad settled result in one step: it writes the corrected settlement score, clears that match's old `Scores` rows, settles the match again, and sends the group a short update with the corrected score and recalculated leaderboard.
 
 ### `/dryrun` parameter
 

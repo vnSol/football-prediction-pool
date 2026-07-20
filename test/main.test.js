@@ -332,6 +332,104 @@ test("reset_latest_settle clears score rows and unlocks latest settled match", (
   ]);
 });
 
+test("resettle_result corrects a settled score, recalculates points, and broadcasts the updated leaderboard", () => {
+  const removals = [];
+  const updates = [];
+  const appended = [];
+  const scoreCalls = [];
+  const match = {
+    matchId: "M001",
+    status: "SETTLED",
+    finalHomeScore: 2,
+    finalAwayScore: 0,
+    finalSummary: "Wrong score",
+    handicapGoals: 0,
+  };
+  const { context, sentMessages, recapMessages } = loadMainContext({
+    getMatchById: () => match,
+    getPicks: () => [
+      { matchId: "M001", telegramUserId: "101", displayName: "An", selection: "HOME", star: false },
+      { matchId: "M001", telegramUserId: "102", displayName: "Binh", selection: "AWAY", star: true },
+    ],
+    buildResetSettlementPatch: () => ({ status: "LOCKED", handicapOutcome: "", settledAt: "" }),
+    removeScoreRowsForMatch: (matchId, actor) => {
+      removals.push({ matchId, actor });
+      return 2;
+    },
+    appendScoreRows: (rows) => appended.push(rows),
+    scorePick: (m, pick, score) => {
+      scoreCalls.push({ match: m, pick, score });
+      return {
+        correct: pick.telegramUserId === "102",
+        points: pick.telegramUserId === "102" ? 2 : 0,
+        outcome: "AWAY",
+      };
+    },
+    parseBoolean: (value) => Boolean(value),
+    getLeaderboard: () => [{ displayName: "Binh", points: 5 }, { displayName: "An", points: 3 }],
+    formatLeaderboard: (rows, limit) =>
+      "🏆 Leaderboard\n" +
+      rows.slice(0, limit).map((row, index) => index + 1 + ". " + row.displayName + " - " + row.points + " điểm").join("\n"),
+    updateMatch: (matchId, patch, actor, action) => updates.push({ matchId, patch, actor, action }),
+  });
+
+  context.adminResettleResult("-100123", "42", ["M001", "1-3", "Corrected", "after", "review"]);
+
+  assert.deepEqual(removals, [{ matchId: "M001", actor: "42" }]);
+  assert.deepEqual(updates[0], {
+    matchId: "M001",
+    patch: {
+      status: "LOCKED",
+      handicapOutcome: "",
+      settledAt: "",
+      finalHomeScore: 1,
+      finalAwayScore: 3,
+      finalSummary: "Corrected after review",
+    },
+    actor: "42",
+    action: "RESETTLE_RESULT",
+  });
+  assert.equal(updates[1].action, "SETTLE_MATCH");
+  assert.equal(updates[1].patch.status, "SETTLED");
+  assert.equal(updates[1].patch.handicapOutcome, "AWAY");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(scoreCalls.map((call) => call.score))),
+    [
+      { homeScore: 1, awayScore: 3 },
+      { homeScore: 1, awayScore: 3 },
+    ]
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(appended[0].map((row) => ({
+      matchId: row.matchId,
+      telegramUserId: row.telegramUserId,
+      points: row.points,
+      outcome: row.outcome,
+    })))),
+    [
+      { matchId: "M001", telegramUserId: "101", points: 0, outcome: "AWAY" },
+      { matchId: "M001", telegramUserId: "102", points: 2, outcome: "AWAY" },
+    ]
+  );
+  assert.deepEqual(recapMessages, [
+    [
+      "📣 Cập nhật kết quả",
+      "Trận M001 đã được sửa tỉ số tính kèo: 1-3.",
+      "Leaderboard đã được tính lại.",
+      "",
+      "🏆 Leaderboard",
+      "1. Binh - 5 điểm",
+      "2. An - 3 điểm",
+    ].join("\n"),
+  ]);
+  assert.deepEqual(sentMessages, [
+    {
+      chatId: "-100123",
+      text: "Đã resettle result M001: xóa 2 score rows cũ, ghi tỉ số 1-3, tính lại điểm. Leaderboard đã đồng bộ.",
+    },
+  ]);
+});
+
 test("resettle flips wrong auto_default picks and re-settles a negative-handicap match without recap", () => {
   const upserts = [];
   const removals = [];

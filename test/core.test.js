@@ -613,6 +613,7 @@ test("formats commands by account role", () => {
   assert.match(adminCommands, /\/lock_summary <matchId>/);
   assert.match(adminCommands, /\/ai_result <matchId>/);
   assert.match(adminCommands, /\/ai_matches <prompt>/);
+  assert.match(adminCommands, /\/resettle_result <matchId> <home-away>/);
   assert.match(adminCommands, /\/reset_latest_settle/);
   assert.match(adminCommands, /\/dryrun \[baseTimeUtc ISO UTC\]/);
   assert.match(adminCommands, /\/dryrun_finish/);
@@ -1178,7 +1179,7 @@ test("parses callback data and builds group-stage pick keyboard", () => {
   assert.equal(keyboard.inline_keyboard.length, 1);
 });
 
-test("builds four fixed choices for knockout pick keyboard", () => {
+test("builds knockout pick keyboard with draw when handicap is rounded", () => {
   assert.deepEqual(parseCallbackData("pick_star|M001|HOME"), {
     action: "pick_star",
     matchId: "M001",
@@ -1191,6 +1192,29 @@ test("builds four fixed choices for knockout pick keyboard", () => {
     homeTeam: "Brazil",
     awayTeam: "Japan",
     handicapGoals: 0,
+  });
+
+  assert.deepEqual(keyboard.inline_keyboard, [
+    [
+      { text: "🇧🇷 Brazil", callback_data: "pick|M001|HOME" },
+      { text: "Hòa", callback_data: "pick|M001|DRAW" },
+      { text: "🇯🇵 Japan", callback_data: "pick|M001|AWAY" },
+    ],
+    [
+      { text: "🇧🇷 Brazil ⭐", callback_data: "pick_star|M001|HOME" },
+      { text: "Hòa ⭐", callback_data: "pick_star|M001|DRAW" },
+      { text: "🇯🇵 Japan ⭐", callback_data: "pick_star|M001|AWAY" },
+    ],
+  ]);
+});
+
+test("hides draw for knockout pick keyboard when handicap is quarter/half", () => {
+  const keyboard = buildPickKeyboard({
+    matchId: "M001",
+    stage: "KNOCKOUT",
+    homeTeam: "Brazil",
+    awayTeam: "Japan",
+    handicapGoals: 0.5,
   });
 
   assert.deepEqual(keyboard.inline_keyboard, [

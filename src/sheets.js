@@ -173,6 +173,46 @@ function resetSheetData(sheetName, actor) {
   return { ok: true, clearedRows: Math.max(0, lastRow - 1) };
 }
 
+// One-off maintenance: rename a matchId across every sheet that references it.
+// matchId is column A in Matches/Picks/Scores; AuditLog stores it in entityId (column E).
+// Telegram callback_data caps at 64 bytes, so overly long matchIds (long team names)
+// break the pick keyboard. Use this to shorten an offending matchId.
+function renameMatchId(oldId, newId) {
+  var oldValue = String(oldId || "").trim();
+  var newValue = String(newId || "").trim();
+  if (!oldValue || !newValue) return { ok: false, reason: "missing_id" };
+  if (oldValue === newValue) return { ok: false, reason: "same_id" };
+
+  var targets = [
+    { sheet: SHEETS.MATCHES, header: "matchId" },
+    { sheet: SHEETS.PICKS, header: "matchId" },
+    { sheet: SHEETS.SCORES, header: "matchId" },
+    { sheet: SHEETS.AUDIT, header: "entityId" },
+  ];
+
+  var updated = {};
+  targets.forEach(function (target) {
+    var column = SHEET_HEADERS[target.sheet].indexOf(target.header) + 1;
+    var sheet = ensureSheet(target.sheet);
+    var lastRow = sheet.getLastRow();
+    var count = 0;
+    if (lastRow > 1) {
+      var range = sheet.getRange(2, column, lastRow - 1, 1);
+      var values = range.getValues();
+      values.forEach(function (row) {
+        if (String(row[0]) === oldValue) {
+          row[0] = newValue;
+          count++;
+        }
+      });
+      if (count) range.setValues(values);
+    }
+    updated[target.sheet] = count;
+  });
+
+  return { ok: true, oldId: oldValue, newId: newValue, updated: updated };
+}
+
 function appendMatches(matches, actor) {
   var created = [];
   var skipped = [];

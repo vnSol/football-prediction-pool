@@ -573,6 +573,7 @@ function formatCommands(isAdmin) {
       "/ai_matches <prompt> - AI/search tìm lịch trận theo yêu cầu, gửi danh sách để admin chọn và submit vào Matches",
       "/ai_result <matchId> - AI tìm tỉ số tính kèo, gửi đề xuất Y/N; confirm thì settle và recap",
       "/result <matchId> <home-away> <diễn biến> - Nhập tỉ số tính kèo sau 90' + bù giờ, không hiệp phụ/luân lưu",
+      "/resettle_result <matchId> <home-away> <diễn biến> - Sửa tỉ số trận đã settle, tính lại điểm và báo group",
       "/settle <matchId> - Chốt điểm",
       "/set_pick <matchId> <telegramUserId> <HOME|AWAY|DEFAULT> - Admin đặt/sửa pick hộ player (DEFAULT = kèo mặc định)",
       "/player_history <telegramUserId> [all|csv] - Xem lịch sử cược của một player kèm nguồn pick (all = toàn bộ, csv = xuất CSV)",
@@ -1952,18 +1953,24 @@ function parseCallbackData(value) {
 
 function buildPickKeyboard(match) {
   if (isKnockout(match)) {
-    return {
-      inline_keyboard: [
-        [
-          { text: sideDisplayName(match, SELECTIONS.HOME), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.HOME },
-          { text: sideDisplayName(match, SELECTIONS.AWAY), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.AWAY },
-        ],
-        [
-          { text: sideDisplayName(match, SELECTIONS.HOME) + " ⭐", callback_data: "pick_star|" + match.matchId + "|" + SELECTIONS.HOME },
-          { text: sideDisplayName(match, SELECTIONS.AWAY) + " ⭐", callback_data: "pick_star|" + match.matchId + "|" + SELECTIONS.AWAY },
-        ],
-      ],
-    };
+    var showDraw = shouldShowDrawOption(match);
+
+    var pickRow = [
+      { text: sideDisplayName(match, SELECTIONS.HOME), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.HOME },
+    ];
+    var starRow = [
+      { text: sideDisplayName(match, SELECTIONS.HOME) + " ⭐", callback_data: "pick_star|" + match.matchId + "|" + SELECTIONS.HOME },
+    ];
+
+    if (showDraw) {
+      pickRow.push({ text: "Hòa", callback_data: "pick|" + match.matchId + "|" + SELECTIONS.DRAW });
+      starRow.push({ text: "Hòa ⭐", callback_data: "pick_star|" + match.matchId + "|" + SELECTIONS.DRAW });
+    }
+
+    pickRow.push({ text: sideDisplayName(match, SELECTIONS.AWAY), callback_data: "pick|" + match.matchId + "|" + SELECTIONS.AWAY });
+    starRow.push({ text: sideDisplayName(match, SELECTIONS.AWAY) + " ⭐", callback_data: "pick_star|" + match.matchId + "|" + SELECTIONS.AWAY });
+
+    return { inline_keyboard: [pickRow, starRow] };
   }
 
   var pickRow = [

@@ -123,6 +123,7 @@ function handleMessage(message) {
   if (command.name === "lock_summary") return resendLockSummary(command.args[0], chatId);
   if (command.name === "ai_result") return adminAiResult(chatId, message.from.id, command.args);
   if (command.name === "result") return adminSetResult(chatId, message.from.id, command.args);
+  if (command.name === "resettle_result") return adminResettleResult(chatId, message.from.id, command.args);
   if (command.name === "settle") return settleMatch(command.args[0], message.from.id, chatId);
   if (command.name === "set_pick") return adminSetPick(chatId, message.from.id, command.args);
   if (command.name === "player_history") return adminPlayerHistory(chatId, command.args);
@@ -932,27 +933,40 @@ function adminAiResult(chatId, actor, args) {
   promptResult(match, chatId, actor);
 }
 
-function adminSetResult(chatId, actor, args) {
+function parseResultCommandArgs(args) {
   var matchId = args[0];
   var scoreParts = String(args[1] || "").split("-");
   var homeScore = Number(scoreParts[0]);
   var awayScore = Number(scoreParts[1]);
   if (!matchId || scoreParts.length !== 2 || !isFinite(homeScore) || !isFinite(awayScore)) {
+    return null;
+  }
+  return {
+    matchId: matchId,
+    homeScore: homeScore,
+    awayScore: awayScore,
+    summary: args.slice(2).join(" "),
+  };
+}
+
+function adminSetResult(chatId, actor, args) {
+  var parsed = parseResultCommandArgs(args);
+  if (!parsed) {
     sendTelegramMessage(chatId, "Cú pháp: /result <matchId> <home-away sau 90' + bù giờ, không hiệp phụ/luân lưu> <diễn biến; cách nhau bằng dấu ;>");
     return;
   }
   updateMatch(
-    matchId,
+    parsed.matchId,
     {
-      finalHomeScore: homeScore,
-      finalAwayScore: awayScore,
-      finalSummary: args.slice(2).join(" "),
+      finalHomeScore: parsed.homeScore,
+      finalAwayScore: parsed.awayScore,
+      finalSummary: parsed.summary,
     },
     actor,
     "SET_RESULT"
   );
-  sendTelegramMessage(chatId, "Đã ghi tỉ số tính kèo " + matchId + ": " + homeScore + "-" + awayScore + ". Đang settle...");
-  settleMatch(matchId, actor, chatId);
+  sendTelegramMessage(chatId, "Đã ghi tỉ số tính kèo " + parsed.matchId + ": " + parsed.homeScore + "-" + parsed.awayScore + ". Đang settle...");
+  settleMatch(parsed.matchId, actor, chatId);
 }
 
 function settleMatch(matchId, actor, replyChatId) {
@@ -1036,6 +1050,45 @@ function adminSetPick(chatId, actor, args) {
     "Đã đặt pick cho " + player.displayName + " ở " + matchId + ": " + sideDisplayName(match, pick.selection) +
       (source === SOURCE.AUTO_DEFAULT ? " (mặc định)" : "") + "."
   );
+}
+
+function adminResettleResult(chatId, actor, args) {
+  var parsed = parseResultCommandArgs(args);
+  if (!parsed) {
+    sendTelegramMessage(chatId, "Cú pháp: /resettle_result <matchId> <home-away sau 90' + bù giờ, không hiệp phụ/luân lưu> <diễn biến; cách nhau bằng dấu ;>");
+    return;
+  }
+
+  var match = getMatchById(parsed.matchId);
+  if (!match || match.status !== STATUSES.SETTLED) {
+    sendTelegramMessage(chatId, "Không resettle result được: thiếu trận hoặc trận chưa settle.");
+    return;
+  }
+
+  var removedRows = removeScoreRowsForMatch(parsed.matchId, actor);
+  var patch = Object.assign(buildResetSettlementPatch(), {
+    finalHomeScore: parsed.homeScore,
+    finalAwayScore: parsed.awayScore,
+    finalSummary: parsed.summary,
+  });
+  updateMatch(parsed.matchId, patch, actor, "RESETTLE_RESULT");
+  settleMatchCore(Object.assign({}, match, patch), actor);
+  sendRecapToConfiguredChats(buildResettleResultBroadcast(parsed.matchId, parsed.homeScore, parsed.awayScore));
+
+  sendTelegramMessage(
+    chatId,
+    "Đã resettle result " + parsed.matchId + ": xóa " + removedRows + " score rows cũ, ghi tỉ số " + parsed.homeScore + "-" + parsed.awayScore + ", tính lại điểm. Leaderboard đã đồng bộ."
+  );
+}
+
+function buildResettleResultBroadcast(matchId, homeScore, awayScore) {
+  return [
+    "📣 Cập nhật kết quả",
+    "Trận " + matchId + " đã được sửa tỉ số tính kèo: " + homeScore + "-" + awayScore + ".",
+    "Leaderboard đã được tính lại.",
+    "",
+    formatLeaderboard(getLeaderboard(), 10),
+  ].join("\n");
 }
 
 function adminResettle(chatId, actor, args) {
