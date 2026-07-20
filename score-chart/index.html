@@ -1085,7 +1085,7 @@ html&gt;body{padding:0}&lt;/style&gt;
       const localX = Math.max(0, Math.min(plotWidth, event.clientX - rect.left - plotLeft));
       const index = Math.round(localX / plotWidth * (rounds - 1));
       updateSelection(index);
-      tooltip.innerHTML = &quot;&lt;strong&gt;Vòng &quot; + (index + 1) + &quot;&lt;/strong&gt;&lt;br&gt;&quot; + players.map(player =&gt; player.name + &quot;: &quot; + player.values[index]).join(&quot;&lt;br&gt;&quot;);
+      tooltip.innerHTML = &quot;&lt;strong&gt;Vòng &quot; + (index + 1) + &quot;&lt;/strong&gt;&lt;br&gt;&quot; + players.map((player, order) =&gt; ({ player, order })).sort((a, b) =&gt; b.player.values[index] - a.player.values[index] || a.order - b.order).map(({ player }) =&gt; player.name + &quot;: &quot; + player.values[index]).join(&quot;&lt;br&gt;&quot;);
       tooltip.style.visibility = &quot;visible&quot;;
       const rootRect = root.getBoundingClientRect();
       const requestedLeft = event.clientX - rootRect.left + 12;
